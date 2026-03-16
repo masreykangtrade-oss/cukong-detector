@@ -1,140 +1,116 @@
-import { logger } from './core/logger';
-import { LightScheduler } from './core/scheduler';
-import { registerShutdown } from './core/shutdown';
-import { assertCriticalEnv } from './config/env';
+import { env } from './config/env';
+import type { TradingMode } from './core/types';
 import { AccountRegistry } from './domain/accounts/accountRegistry';
 import { AccountStore } from './domain/accounts/accountStore';
-import { HotlistService } from './domain/market/hotlistService';
-import { MarketWatcher } from './domain/market/marketWatcher';
-import { PairUniverse } from './domain/market/pairUniverse';
-import { SignalEngine } from './domain/signals/signalEngine';
 import { SettingsService } from './domain/settings/settingsService';
-import { ExecutionEngine } from './domain/trading/executionEngine';
-import { OrderManager } from './domain/trading/orderManager';
-import { PositionManager } from './domain/trading/positionManager';
-import { RiskEngine } from './domain/trading/riskEngine';
-import { IndodaxClient } from './integrations/indodax/client';
-import { TelegramBot } from './integrations/telegram/bot';
+import { createTelegramBot } from './integrations/telegram/bot';
 import { HealthService } from './services/healthService';
 import { JournalService } from './services/journalService';
 import { PersistenceService } from './services/persistenceService';
-import { PollingService } from './services/pollingService';
 import { ReportService } from './services/reportService';
 import { StateService } from './services/stateService';
 
-export async function createApp(): Promise<{ start: () => Promise<void>; stop: () => Promise<void> }> {
-  assertCriticalEnv();
+export interface AppContext {
+  env: typeof env;
+  persistenceService: PersistenceService;
+  stateService: StateService;
+  healthService: HealthService;
+  journalService: JournalService;
+  settingsService: SettingsService;
+  reportService: ReportService;
+  accountStore: AccountStore;
+  accountRegistry: AccountRegistry;
+}
 
-  const scheduler = new LightScheduler();
-  const polling = new PollingService(scheduler);
-  const persistence = new PersistenceService();
-  const state = new StateService(persistence);
-  const settings = new SettingsService(persistence);
-  const journal = new JournalService(persistence);
-  const orderManager = new OrderManager(persistence);
-  const positionManager = new PositionManager(persistence);
+export interface AppRuntime {
+  context: AppContext;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+  isStarted: () => boolean;
+}
+
+export async function createApp(): Promise<AppRuntime> {
+  const persistenceService = new PersistenceService();
+  await persistenceService.ensureReady();
+
+  const stateService = new StateService(persistenceService);
+  const healthService = new HealthService(persistenceService);
+  const journalService = new JournalService(persistenceService);
+  const settingsService = new SettingsService(persistenceService);
+  const reportService = new ReportService();
   const accountStore = new AccountStore();
   const accountRegistry = new AccountRegistry(accountStore);
 
-  await Promise.all(\[
-    state.load(),
-    settings.load(),
-    journal.load(),
-    orderManager.load(),
-    positionManager.load(),
-    accountRegistry.reload(),
-  ]);
+  await accountRegistry.initialize();
 
-  const report = new ReportService();
-  const health = new HealthService(state);
-  const universe = new PairUniverse();
-  const indodax = new IndodaxClient();
-  const watcher = new MarketWatcher(indodax, universe);
-  const signals = new SignalEngine(universe);
-  const hotlist = new HotlistService();
-  const risk = new RiskEngine();
-  const execution = new ExecutionEngine(accountRegistry, settings, state, risk, indodax, positionManager, orderManager, journal);
+  const currentSettings = await settingsService.getSettings();
+  const initialMode = (currentSettings.tradingMode ?? env.defaultTradingMode) as TradingMode;
 
-  const telegram = new TelegramBot({
-    report,
-    health,
-    state,
-    hotlist,
-    positions: positionManager,
-    orders: orderManager,
-    accounts: accountRegistry,
+  await stateService.initialize?.();
+  await healthService.markBooting?.({
+    mode: initialMode,
+    activeAccounts: accountRegistry.countEnabled(),
+  });
+
+  const context: AppContext = {
+    env,
+    persistenceService,
+    stateService,
+    healthService,
+    journalService,
+    settingsService,
+    reportService,
     accountStore,
-    settings,
-    execution,
-    journal,
+    accountRegistry,
+  };
+
+  const telegram = await createTelegramBot({
+    env,
+    accountRegistry,
+    stateService,
+    healthService,
+    settingsService,
+    reportService,
+    journalService,
   });
 
-  polling.register('market-watch', 2\_500, async () => {
-    if (!state.get().started) {
-      return;
-    }
+  let started = false;
 
-    const bundles = await watcher.batchSnapshot(4);
-    for (const bundle of bundles) {
-      await positionManager.updateMark(bundle.pair, bundle.ticker.lastPrice);
-    }
-
-    const scored = signals.scoreMany(bundles);
-    const list = hotlist.update(scored);
-    await persistence.saveHotlist(list);
-    await persistence.savePairMetrics(universe.exportMetrics(watcher.exportHistory()));
-
-    if (list\[0]) {
-      await state.markSignal();
-    }
-
-    if (list\[0] \&\& settings.get().tradingMode === 'FULL\_AUTO' \&\& list\[0].score >= settings.get().strategy.scoreAutoEntryThreshold) {
-      try {
-        const result = await execution.attemptAutoBuy(list\[0]);
-        logger.info({ result, pair: list\[0].pair }, 'auto-buy evaluated');
-      } catch (error) {
-        await state.markError(error instanceof Error ? error.message : 'auto-buy error');
+  return {
+    context,
+    isStarted: () => started,
+    start: async () => {
+      if (started) {
+        return;
       }
-    }
-  });
 
-  polling.register('position-exit-check', 5\_000, async () => {
-    if (!state.get().started) {
-      return;
-    }
-    const exits = await execution.evaluateOpenPositions();
-    if (exits.length) {
-      logger.info({ exits }, 'position exits executed');
-    }
-  });
+      await accountRegistry.reload();
 
-  polling.register('heartbeat', 5\_000, async () => {
-    const current = state.get();
-    await state.patch({
-      uptimeMs: current.startedAt ? Math.max(0, Date.now() - new Date(current.startedAt).getTime()) : current.uptimeMs,
-      pollingStats: {
-        activeJobs: polling.stats().activeJobs,
-        tickCount: current.pollingStats.tickCount + 1,
-        lastTickAt: new Date().toISOString(),
-      },
-    });
-  });
+      await telegram.launch();
 
-  const start = async (): Promise<void> => {
-    await state.setStarted(true);
-    polling.start();
-    await telegram.start();
-    logger.info({ accounts: accountRegistry.listEnabled().length }, 'mafiamarkets app started');
+      await healthService.markStarted?.({
+        mode: initialMode,
+        activeAccounts: accountRegistry.countEnabled(),
+      });
+
+      await journalService.appendSystem?.('APP_STARTED', {
+        mode: initialMode,
+        activeAccounts: accountRegistry.countEnabled(),
+      });
+
+      started = true;
+    },
+    stop: async () => {
+      if (!started) {
+        return;
+      }
+
+      await telegram.stop('app shutdown');
+
+      await healthService.markStopped?.();
+      await journalService.appendSystem?.('APP_STOPPED', {});
+
+      started = false;
+    },
   };
-
-  const stop = async (): Promise<void> => {
-    polling.stop();
-    await telegram.stop();
-    await state.patch({ started: false, marketWatcherRunning: false });
-    logger.info('mafiamarkets app stopped');
-  };
-
-  registerShutdown(\[stop]);
-
-  return { start, stop };
 }
