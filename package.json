@@ -1,0 +1,28 @@
+{
+  "name": "mafiamarkets",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Indodax scalping/anomaly Telegram trading bot with modular TypeScript architecture",
+  "main": "dist/bootstrap.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/bootstrap.ts",
+    "start": "node dist/bootstrap.js",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "telegraf": "^4.16.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
