@@ -39,3 +39,5 @@ Yang masih kurang
 
 Tujuan akhir bot ini menjadi:
 mesin intelijen market Indodax yang membaca jejak bandar, memisahkan peluang asli dari jebakan, lalu mengubahnya menjadi keputusan trading yang bisa dijalankan
+
+
