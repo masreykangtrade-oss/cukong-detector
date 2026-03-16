@@ -1,61 +1,157 @@
-import type { AccountCredential, BotSettings, RuntimePosition, SignalCandidate } from '../../core/types';
+import type {
+  BotSettings,
+  PositionRecord,
+  RiskCheckResult,
+  SignalCandidate,
+  StoredAccount,
+} from '../../core/types';
 
-export class RiskEngine {
-  assertCanEnter(input: {
-    account: AccountCredential;
-    settings: BotSettings;
-    signal: SignalCandidate;
-    positions: RuntimePosition\[];
-    amountIdr: number;
-    pairCooldownUntil?: string | null;
-  }): void {
-    const { account, settings, signal, positions, amountIdr, pairCooldownUntil } = input;
+export interface RiskEntryCheckInput {
+  account: StoredAccount;
+  settings: BotSettings;
+  signal: SignalCandidate;
+  openPositions: PositionRecord[];
+  amountIdr: number;
+  cooldownUntil?: number | null;
+}
 
-    if (!account.enabled) {
-      throw new Error('Account nonaktif');
-    }
-    if (signal.score < settings.strategy.scoreAutoEntryThreshold \&\& settings.tradingMode === 'FULL\_AUTO') {
-      throw new Error('Score di bawah auto-entry threshold');
-    }
-    if (signal.ticker.spreadPct > settings.risk.maxSpreadPct) {
-      throw new Error('Spread melebihi batas risiko');
-    }
-    if (signal.ticker.liquidityScore < settings.risk.minLiquidityScore) {
-      throw new Error('Likuiditas pair tidak memenuhi minimum');
-    }
-    if (amountIdr > settings.risk.maxModalPerTrade) {
-      throw new Error('Nominal melebihi max modal per trade');
-    }
-    if (positions.filter((item) => item.status === 'open').length >= settings.risk.maxActivePositionsTotal) {
-      throw new Error('Melebihi max active positions total');
-    }
-    if (positions.filter((item) => item.status === 'open' \&\& item.accountId === account.id).length >= settings.risk.maxActivePositionsPerAccount) {
-      throw new Error('Melebihi max active positions per account');
-    }
-    if (positions.filter((item) => item.status === 'open' \&\& item.pair === signal.pair).length >= settings.risk.maxExposurePerPair) {
-      throw new Error('Exposure per pair sudah penuh');
-    }
-    if (pairCooldownUntil \&\& new Date(pairCooldownUntil).getTime() > Date.now()) {
-      throw new Error('Pair masih cooldown');
-    }
+export interface ExitDecision {
+  shouldExit: boolean;
+  reason?: 'TAKE_PROFIT' | 'STOP_LOSS' | 'TRAILING_STOP';
+}
+
+function pctChange(from: number, to: number): number {
+  if (from <= 0) {
+    return 0;
   }
 
-  evaluateExit(position: RuntimePosition): { shouldExit: boolean; reason?: RuntimePosition\['exitReason'] } {
-    if (position.status !== 'open') {
+  return ((to - from) / from) * 100;
+}
+
+export class RiskEngine {
+  checkCanEnter(input: RiskEntryCheckInput): RiskCheckResult {
+    const reasons: string[] = [];
+    const warnings: string[] = [];
+
+    if (!input.account.enabled) {
+      reasons.push('Account nonaktif');
+    }
+
+    if (input.signal.score < input.settings.strategy.minScoreToBuy) {
+      reasons.push('Score di bawah minimum buy');
+    }
+
+    if (input.signal.confidence < input.settings.strategy.minConfidence) {
+      reasons.push('Confidence di bawah minimum');
+    }
+
+    if (input.signal.spreadPct > input.settings.risk.maxPairSpreadPct) {
+      reasons.push('Spread pair melebihi batas risiko');
+    }
+
+    if (input.amountIdr > input.settings.risk.maxPositionSizeIdr) {
+      reasons.push('Ukuran posisi melebihi batas');
+    }
+
+    if (input.openPositions.length >= input.settings.risk.maxOpenPositions) {
+      reasons.push('Jumlah posisi terbuka mencapai batas');
+    }
+
+    const samePairOpen = input.openPositions.some((item) => item.pair === input.signal.pair);
+    if (samePairOpen) {
+      reasons.push('Masih ada posisi terbuka pada pair yang sama');
+    }
+
+    if (
+      input.cooldownUntil &&
+      Number.isFinite(input.cooldownUntil) &&
+      input.cooldownUntil > Date.now()
+    ) {
+      reasons.push('Pair masih cooldown');
+    }
+
+    if (input.signal.orderbookImbalance < 0) {
+      warnings.push('Orderbook belum mendukung bias buy');
+    }
+
+    if (input.signal.breakoutPressure < 5) {
+      warnings.push('Breakout pressure masih lemah');
+    }
+
+    if (
+      input.settings.strategy.useAntiSpoof &&
+      input.signal.orderbookImbalance >= input.settings.strategy.spoofRiskBlockThreshold
+    ) {
+      reasons.push('Spoof/trap risk threshold terlewati');
+    }
+
+    return {
+      allowed: reasons.length === 0,
+      reasons,
+      warnings,
+    };
+  }
+
+  evaluateExit(
+    position: PositionRecord,
+    settings: BotSettings,
+  ): ExitDecision {
+    if (position.status === 'CLOSED') {
       return { shouldExit: false };
     }
 
-    const changePct = position.entryPrice > 0 ? ((position.lastMarkPrice - position.entryPrice) / position.entryPrice) \* 100 : 0;
-    if (changePct <= -Math.abs(position.stopLossPct)) {
-      return { shouldExit: true, reason: 'stop\_loss' };
+    const pnlPct = pctChange(position.averageEntryPrice, position.currentPrice);
+
+    if (
+      position.takeProfitPrice !== null &&
+      position.currentPrice >= position.takeProfitPrice
+    ) {
+      return { shouldExit: true, reason: 'TAKE_PROFIT' };
     }
-    if (changePct >= Math.abs(position.takeProfitPct)) {
-      return { shouldExit: true, reason: 'take\_profit' };
+
+    if (
+      position.stopLossPrice !== null &&
+      position.currentPrice <= position.stopLossPrice
+    ) {
+      return { shouldExit: true, reason: 'STOP_LOSS' };
     }
-    const heldMs = Date.now() - new Date(position.openedAt).getTime();
-    if (heldMs >= position.maxHoldMinutes \* 60\_000) {
-      return { shouldExit: true, reason: 'max\_hold' };
+
+    if (pnlPct >= settings.risk.takeProfitPct) {
+      return { shouldExit: true, reason: 'TAKE_PROFIT' };
     }
+
+    if (pnlPct <= -Math.abs(settings.risk.stopLossPct)) {
+      return { shouldExit: true, reason: 'STOP_LOSS' };
+    }
+
+    const trailingTrigger = settings.risk.takeProfitPct * 0.7;
+    if (
+      pnlPct >= trailingTrigger &&
+      pnlPct <= Math.max(0, trailingTrigger - settings.risk.trailingStopPct)
+    ) {
+      return { shouldExit: true, reason: 'TRAILING_STOP' };
+    }
+
     return { shouldExit: false };
+  }
+
+  buildStops(
+    entryPrice: number,
+    settings: BotSettings,
+  ): {
+    stopLossPrice: number | null;
+    takeProfitPrice: number | null;
+  } {
+    if (entryPrice <= 0) {
+      return {
+        stopLossPrice: null,
+        takeProfitPrice: null,
+      };
+    }
+
+    return {
+      stopLossPrice: entryPrice * (1 - settings.risk.stopLossPct / 100),
+      takeProfitPrice: entryPrice * (1 + settings.risk.takeProfitPct / 100),
+    };
   }
 }
