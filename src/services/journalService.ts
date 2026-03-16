@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { JournalEntry } from '../core/types';
 import { PersistenceService } from './persistenceService';
 
