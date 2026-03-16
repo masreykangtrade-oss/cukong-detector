@@ -1,26 +1,18 @@
 import type { SignalCandidate } from '../../core/types';
 
 export class HotlistService {
-  private hotlist: SignalCandidate\[] = \[];
+  private items: SignalCandidate[] = [];
 
-  update(candidates: SignalCandidate\[], limit = 12): SignalCandidate\[] {
-    this.hotlist = \[...candidates]
-      .sort((a, b) => {
-        if (b.score !== a.score) {
-          return b.score - a.score;
-        }
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      })
-      .slice(0, limit);
-
-    return this.hotlist;
+  update(input: SignalCandidate[]): SignalCandidate[] {
+    this.items = [...input].sort((a, b) => b.score - a.score).slice(0, 20);
+    return this.items;
   }
 
-  list(): SignalCandidate\[] {
-    return this.hotlist;
+  list(): SignalCandidate[] {
+    return [...this.items];
   }
 
-  get(pair: string): SignalCandidate | undefined {
-    return this.hotlist.find((item) => item.pair === pair);
+  top(): SignalCandidate | undefined {
+    return this.items[0];
   }
 }
