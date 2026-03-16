@@ -1,6 +1,7 @@
 import { logger } from './core/logger';
 import { LightScheduler } from './core/scheduler';
 import { registerShutdown } from './core/shutdown';
+import { assertCriticalEnv } from './config/env';
 import { AccountRegistry } from './domain/accounts/accountRegistry';
 import { AccountStore } from './domain/accounts/accountStore';
 import { HotlistService } from './domain/market/hotlistService';
@@ -22,6 +23,8 @@ import { ReportService } from './services/reportService';
 import { StateService } from './services/stateService';
 
 export async function createApp(): Promise<{ start: () => Promise<void>; stop: () => Promise<void> }> {
+  assertCriticalEnv();
+
   const scheduler = new LightScheduler();
   const polling = new PollingService(scheduler);
   const persistence = new PersistenceService();
@@ -66,21 +69,25 @@ export async function createApp(): Promise<{ start: () => Promise<void>; stop: (
     journal,
   });
 
-  polling.register('market-watch', 2500, async () => {
+  polling.register('market-watch', 2\_500, async () => {
     if (!state.get().started) {
       return;
     }
+
     const bundles = await watcher.batchSnapshot(4);
     for (const bundle of bundles) {
       await positionManager.updateMark(bundle.pair, bundle.ticker.lastPrice);
     }
+
     const scored = signals.scoreMany(bundles);
     const list = hotlist.update(scored);
     await persistence.saveHotlist(list);
     await persistence.savePairMetrics(universe.exportMetrics(watcher.exportHistory()));
+
     if (list\[0]) {
       await state.markSignal();
     }
+
     if (list\[0] \&\& settings.get().tradingMode === 'FULL\_AUTO' \&\& list\[0].score >= settings.get().strategy.scoreAutoEntryThreshold) {
       try {
         const result = await execution.attemptAutoBuy(list\[0]);
@@ -91,7 +98,7 @@ export async function createApp(): Promise<{ start: () => Promise<void>; stop: (
     }
   });
 
-  polling.register('position-exit-check', 5000, async () => {
+  polling.register('position-exit-check', 5\_000, async () => {
     if (!state.get().started) {
       return;
     }
@@ -101,16 +108,15 @@ export async function createApp(): Promise<{ start: () => Promise<void>; stop: (
     }
   });
 
-  polling.register('heartbeat', 5000, async () => {
+  polling.register('heartbeat', 5\_000, async () => {
     const current = state.get();
     await state.patch({
       uptimeMs: current.startedAt ? Math.max(0, Date.now() - new Date(current.startedAt).getTime()) : current.uptimeMs,
       pollingStats: {
         activeJobs: polling.stats().activeJobs,
-        jobs: undefined as never,
         tickCount: current.pollingStats.tickCount + 1,
         lastTickAt: new Date().toISOString(),
-      } as any,
+      },
     });
   });
 
