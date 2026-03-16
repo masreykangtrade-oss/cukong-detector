@@ -1,29 +1,21 @@
-import type { RuntimeState, TradingMode } from '../core/types';
-import { nowIso } from '../utils/time';
-import { PersistenceService } from './persistenceService';
+import type {
+  HotlistEntry,
+  OpportunityAssessment,
+  PairRuntimeState,
+  RuntimeState,
+  RuntimeStatus,
+  SignalCandidate,
+  TradingMode,
+} from '../core/types';
+import { PersistenceService, createDefaultRuntimeState } from './persistenceService';
 
 export class StateService {
-  private state: RuntimeState = {
-    started: false,
-    startedAt: null,
-    updatedAt: nowIso(),
-    uptimeMs: 0,
-    lastSignalAt: null,
-    lastTradeAt: null,
-    lastErrorAt: null,
-    lastErrorMessage: null,
-    marketWatcherRunning: false,
-    tradingMode: 'OFF',
-    pairCooldowns: {},
-    cacheStats: { hit: 0, miss: 0 },
-    pollingStats: { activeJobs: 0, tickCount: 0, lastTickAt: null },
-  };
+  private state: RuntimeState = createDefaultRuntimeState();
 
   constructor(private readonly persistence: PersistenceService) {}
 
   async load(): Promise<RuntimeState> {
-    const snapshot = await this.persistence.loadAll();
-    this.state = snapshot.state;
+    this.state = await this.persistence.readState();
     return this.state;
   }
 
@@ -31,42 +23,151 @@ export class StateService {
     return this.state;
   }
 
-  async replace(nextState: RuntimeState): Promise<void> {
-    this.state = { ...nextState, updatedAt: nowIso() };
-    await this.persistence.saveState(this.state);
-  }
-
-  async patch(partial: Partial<RuntimeState>): Promise<RuntimeState> {
-    this.state = { ...this.state, ...partial, updatedAt: nowIso() };
+  async replace(next: RuntimeState): Promise<RuntimeState> {
+    this.state = {
+      ...next,
+      lastUpdatedAt: new Date().toISOString(),
+    };
     await this.persistence.saveState(this.state);
     return this.state;
   }
 
-  async setStarted(started: boolean): Promise<void> {
-    await this.patch({
-      started,
-      startedAt: started ? this.state.startedAt ?? nowIso() : this.state.startedAt,
-      marketWatcherRunning: started,
+  async patch(partial: Partial<RuntimeState>): Promise<RuntimeState> {
+    this.state = {
+      ...this.state,
+      ...partial,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    await this.persistence.saveState(this.state);
+    return this.state;
+  }
+
+  async setStatus(status: RuntimeStatus): Promise<RuntimeState> {
+    const now = new Date().toISOString();
+
+    return this.patch({
+      status,
+      startedAt:
+        status === 'STARTING' || status === 'RUNNING'
+          ? this.state.startedAt ?? now
+          : this.state.startedAt,
+      stoppedAt:
+        status === 'STOPPING' || status === 'STOPPED'
+          ? now
+          : this.state.stoppedAt,
     });
   }
 
-  async setTradingMode(mode: TradingMode): Promise<void> {
-    await this.patch({ tradingMode: mode });
+  async setTradingMode(mode: TradingMode): Promise<RuntimeState> {
+    return this.patch({
+      activeTradingMode: mode,
+    });
   }
 
-  async markSignal(): Promise<void> {
-    await this.patch({ lastSignalAt: nowIso() });
+  async setEmergencyStop(enabled: boolean): Promise<RuntimeState> {
+    return this.patch({
+      emergencyStop: enabled,
+    });
   }
 
-  async markTrade(): Promise<void> {
-    await this.patch({ lastTradeAt: nowIso() });
+  async setPairCooldown(pair: string, untilMs: number): Promise<RuntimeState> {
+    return this.patch({
+      pairCooldowns: {
+        ...this.state.pairCooldowns,
+        [pair]: untilMs,
+      },
+    });
   }
 
-  async markError(message: string): Promise<void> {
-    await this.patch({ lastErrorAt: nowIso(), lastErrorMessage: message });
+  async clearPairCooldown(pair: string): Promise<RuntimeState> {
+    const next = { ...this.state.pairCooldowns };
+    delete next[pair];
+
+    return this.patch({
+      pairCooldowns: next,
+    });
   }
 
-  async setCooldown(pair: string, untilIso: string): Promise<void> {
-    await this.patch({ pairCooldowns: { ...this.state.pairCooldowns, \[pair]: untilIso } });
+  async upsertPairState(
+    pair: string,
+    partial: Partial<PairRuntimeState>,
+  ): Promise<RuntimeState> {
+    const current: PairRuntimeState =
+      this.state.pairs[pair] ?? {
+        pair,
+        lastSeenAt: Date.now(),
+        lastSignalAt: null,
+        cooldownUntil: null,
+        lastOpportunity: null,
+      };
+
+    return this.patch({
+      pairs: {
+        ...this.state.pairs,
+        [pair]: {
+          ...current,
+          ...partial,
+          pair,
+        },
+      },
+    });
+  }
+
+  async markPairSeen(pair: string): Promise<RuntimeState> {
+    return this.upsertPairState(pair, {
+      lastSeenAt: Date.now(),
+    });
+  }
+
+  async markSignal(pair: string): Promise<RuntimeState> {
+    const now = Date.now();
+    const current = this.state.pairs[pair];
+
+    return this.patch({
+      pairs: {
+        ...this.state.pairs,
+        [pair]: {
+          pair,
+          lastSeenAt: current?.lastSeenAt ?? now,
+          lastSignalAt: now,
+          cooldownUntil: current?.cooldownUntil ?? null,
+          lastOpportunity: current?.lastOpportunity ?? null,
+        },
+      },
+    });
+  }
+
+  async setSignals(signals: SignalCandidate[]): Promise<RuntimeState> {
+    return this.patch({
+      lastSignals: signals,
+    });
+  }
+
+  async setHotlist(hotlist: HotlistEntry[]): Promise<RuntimeState> {
+    return this.patch({
+      lastHotlist: hotlist,
+    });
+  }
+
+  async setOpportunities(
+    opportunities: OpportunityAssessment[],
+  ): Promise<RuntimeState> {
+    const nextPairs = { ...this.state.pairs };
+
+    for (const item of opportunities) {
+      const current = nextPairs[item.pair];
+      nextPairs[item.pair] = {
+        pair: item.pair,
+        lastSeenAt: current?.lastSeenAt ?? item.timestamp,
+        lastSignalAt: current?.lastSignalAt ?? item.timestamp,
+        cooldownUntil: current?.cooldownUntil ?? null,
+        lastOpportunity: item,
+      };
+    }
+
+    return this.patch({
+      lastOpportunities: opportunities,
+      pairs: nextPairs,
+    });
   }
 }
