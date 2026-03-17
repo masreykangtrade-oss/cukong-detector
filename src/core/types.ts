@@ -283,6 +283,7 @@ export interface PositionRecord {
   entryPrice: number;
   averageEntryPrice: number;
   currentPrice: number;
+  peakPrice: number;
   unrealizedPnl: number;
   realizedPnl: number;
   stopLossPrice: number | null;

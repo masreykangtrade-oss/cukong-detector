@@ -53,6 +53,7 @@ export class PositionManager {
       entryPrice: input.entryPrice,
       averageEntryPrice: input.entryPrice,
       currentPrice: input.entryPrice,
+      peakPrice: input.entryPrice,
       unrealizedPnl: 0,
       realizedPnl: 0,
       stopLossPrice: input.stopLossPrice,
@@ -77,6 +78,7 @@ export class PositionManager {
       return {
         ...item,
         currentPrice: markPrice,
+        peakPrice: Math.max(item.peakPrice ?? item.currentPrice, markPrice),
         unrealizedPnl: (markPrice - item.averageEntryPrice) * item.quantity,
         updatedAt: nowIso(),
       };
@@ -104,6 +106,7 @@ export class PositionManager {
       ...current,
       quantity: remainingQuantity,
       currentPrice: exitPrice,
+      peakPrice: Math.max(current.peakPrice ?? current.currentPrice, exitPrice),
       realizedPnl,
       unrealizedPnl: (exitPrice - current.averageEntryPrice) * remainingQuantity,
       status:

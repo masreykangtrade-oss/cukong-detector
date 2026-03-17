@@ -149,3 +149,68 @@ Tujuan:
 - Jangan ulang Batch 1E, 2A, 2B, 2C
 - Semua patch baru harus menjaga kompatibilitas dengan hasil sesi ini
 - Jika ada mismatch type/contract, prioritaskan jalur runtime yang sudah dibentuk pada sesi ini sebagai baseline utama
+
+---
+
+## Update konteks terbaru setelah iterasi implementasi ini
+
+### Batch 3A sudah selesai diterapkan
+Cakupan baru:
+- `src/domain/microstructure/*`
+- `src/domain/history/*`
+- `src/domain/intelligence/*`
+- penyelarasan contract di app/runtime/report/telegram/execution/risk
+
+### Jalur runtime aktif yang sekarang harus dianggap final
+- market watcher membangun `MarketSnapshot`
+- signal engine menghasilkan `SignalCandidate` aktif
+- feature pipeline + history + probability + edge validator + entry timing menghasilkan `OpportunityAssessment`
+- hotlist memakai output opportunity sebagai ranking utama
+- execution/risk membaca contract opportunity aktif sebelum auto/manual entry
+- persistence menyimpan snapshot, signal, opportunity, dan anomaly event
+
+### Contract aktif yang wajib dipertahankan
+- `SignalCandidate` sekarang membawa konteks runtime tambahan:
+  - `marketPrice`
+  - `bestBid`
+  - `bestAsk`
+  - `liquidityScore`
+  - `change1m`
+  - `change5m`
+  - `contributions`
+- `OpportunityAssessment` sekarang menjadi contract final sebelum execution:
+  - `pumpProbability`
+  - `trapProbability`
+  - `edgeValid`
+  - `entryTiming`
+  - `recommendedAction`
+  - `riskContext`
+  - `historicalMatchSummary`
+  - `referencePrice`
+- `PositionRecord` sekarang menyimpan `peakPrice` untuk trailing stop yang valid
+
+### Hal penting yang sudah tervalidasi
+- `yarn lint` lulus
+- `yarn build` lulus
+- runtime regression test lulus di:
+  `tests/runtime_backend_regression.ts`
+
+### Bug penting yang sudah ditutup
+- trailing-stop unreachable logic di `src/domain/trading/riskEngine.ts`
+- mismatch direction `change24hPct` di `src/domain/market/marketWatcher.ts`
+
+### Prioritas berikutnya (jangan mundur ke batch lama)
+1. Batch 3B
+   - `src/workers/*`
+   - `src/services/workerPoolService.ts`
+   - `src/domain/backtest/*`
+2. Hardening live integration
+   - review `indodax/privateApi.ts` terhadap respons/live fill semantics
+   - sinkronisasi report Telegram untuk intelligence report yang lebih kaya
+3. Enrichment report/UI Telegram
+   - menu intelligence report / spoof radar / pattern match / backtest
+
+### Rule kerja yang tetap sama
+- jangan ulang refactor batch lama kecuali untuk penghubung nyata
+- prioritaskan kestabilan runtime, konsistensi contract aktif, dan koneksi antar modul
+- jika ada mismatch baru, pertahankan jalur opportunity sebagai baseline runtime utama

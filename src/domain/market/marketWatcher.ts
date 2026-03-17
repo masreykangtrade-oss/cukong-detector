@@ -179,7 +179,10 @@ export class MarketWatcher {
         const prev1m = this.getPriceBefore(item.pair, timestamp - 60_000);
         const prev5m = this.getPriceBefore(item.pair, timestamp - 300_000);
 
-        ticker.change24hPct = this.percentChange(ticker.low24h || ticker.lastPrice, ticker.lastPrice);
+        ticker.change24hPct = this.percentChange(
+          ticker.lastPrice,
+          ticker.low24h || ticker.lastPrice,
+        );
 
         snapshots.push({
           pair: item.pair,
@@ -189,7 +192,10 @@ export class MarketWatcher {
             low24h:
               Math.min(...[item.lastPrice, item.bestAsk, item.bestBid].filter((value) => value > 0)) ||
               item.lastPrice,
-            change24hPct: this.percentChange(ticker.low24h || ticker.lastPrice, ticker.lastPrice),
+            change24hPct: this.percentChange(
+              ticker.lastPrice,
+              ticker.low24h || ticker.lastPrice,
+            ),
           },
           orderbook: snapshotOrderbook,
           recentTrades,

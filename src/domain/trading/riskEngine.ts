@@ -146,6 +146,8 @@ export class RiskEngine {
     }
 
     const pnlPct = pctChange(position.averageEntryPrice, position.currentPrice);
+    const peakPrice = position.peakPrice ?? position.currentPrice;
+    const peakPnlPct = pctChange(position.averageEntryPrice, peakPrice);
 
     if (
       position.takeProfitPrice !== null &&
@@ -170,10 +172,9 @@ export class RiskEngine {
     }
 
     const trailingTrigger = settings.risk.takeProfitPct * 0.7;
-    if (
-      pnlPct >= trailingTrigger &&
-      pnlPct <= Math.max(0, trailingTrigger - settings.risk.trailingStopPct)
-    ) {
+    const trailingFloorPct = peakPnlPct - Math.abs(settings.risk.trailingStopPct);
+
+    if (peakPnlPct >= trailingTrigger && pnlPct <= trailingFloorPct) {
       return { shouldExit: true, reason: 'TRAILING_STOP' };
     }
 

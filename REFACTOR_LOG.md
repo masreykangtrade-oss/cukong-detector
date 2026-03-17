@@ -553,3 +553,80 @@ Lalu batch berikutnya:
 
 ## 7. Ringkasan singkat satu paragraf
 Pada sesi ini, refactor yang berhasil disusun sampai tuntas baru mencakup fondasi kontrak inti, runtime core, persistence/state/settings/health/journal, dan reset kontrak Telegram. Semua perubahan sudah dijabarkan sebagai replacement draft final per file, tetapi belum diterapkan langsung ke repo GitHub. Sesi berikutnya paling logis melanjutkan `reportService`, layer accounts, lalu `app.ts` dan `bootstrap.ts` agar wiring utama bot mulai sinkron dengan fondasi baru.
+
+---
+
+## Batch lanjutan yang selesai pada iterasi ini
+
+### Batch 3A — Intelligence/history runtime integration + contract finalization
+
+Tujuan:
+- menyambungkan jalur runtime dari market baseline ke `OpportunityAssessment`
+- menutup mismatch contract aktif yang masih tertinggal di app/runtime/report/telegram/execution
+- menambahkan persistence history/anomaly yang benar-benar dipakai jalur runtime
+
+File baru:
+- `src/utils/math.ts`
+- `src/domain/microstructure/accumulationDetector.ts`
+- `src/domain/microstructure/spoofDetector.ts`
+- `src/domain/microstructure/icebergDetector.ts`
+- `src/domain/microstructure/tradeClusterDetector.ts`
+- `src/domain/history/regimeClassifier.ts`
+- `src/domain/history/patternLibrary.ts`
+- `src/domain/history/patternMatcher.ts`
+- `src/domain/history/pairHistoryStore.ts`
+- `src/domain/intelligence/featurePipeline.ts`
+- `src/domain/intelligence/probabilityEngine.ts`
+- `src/domain/intelligence/edgeValidator.ts`
+- `src/domain/intelligence/scoreExplainer.ts`
+- `src/domain/intelligence/entryTimingEngine.ts`
+- `src/domain/intelligence/opportunityEngine.ts`
+- `tests/runtime_backend_regression.ts`
+
+File patch utama:
+- `src/app.ts`
+- `src/core/types.ts`
+- `src/storage/jsonStore.ts`
+- `src/services/persistenceService.ts`
+- `src/services/stateService.ts`
+- `src/services/reportService.ts`
+- `src/domain/accounts/accountStore.ts`
+- `src/domain/market/hotlistService.ts`
+- `src/domain/market/marketWatcher.ts`
+- `src/domain/signals/signalEngine.ts`
+- `src/domain/trading/executionEngine.ts`
+- `src/domain/trading/riskEngine.ts`
+- `src/domain/trading/positionManager.ts`
+- `src/integrations/telegram/handlers.ts`
+- `src/integrations/indodax/privateApi.ts`
+- `src/integrations/http/httpClient.ts`
+- `src/integrations/indodax/mapper.ts`
+- `src/utils/validators.ts`
+- `src/utils/time.ts`
+- `src/utils/retry.ts`
+- `src/core/metrics.ts`
+- `src/services/pollingService.ts`
+- `tsconfig.json`
+
+Hasil utama:
+- `SignalCandidate` difinalkan agar membawa konteks runtime yang benar-benar dipakai (`marketPrice`, `bestBid`, `bestAsk`, `liquidityScore`, `change1m`, `change5m`, `contributions`)
+- `OpportunityAssessment` dijadikan contract aktif sebelum execution, lengkap dengan probability, edge validation, timing, risk context, historical match summary, dan harga referensi
+- app wiring sekarang benar-benar mengalir:
+  `market snapshot -> signal -> feature pipeline -> historical context -> probability -> edge validation -> entry timing -> opportunity -> hotlist -> execution`
+- history runtime sekarang menyimpan snapshot, signal, opportunity, dan anomaly event ke persistence JSONL
+- `ExecutionEngine` dan `RiskEngine` sekarang membaca contract opportunity aktif, tidak lagi bergantung pada bridge entry price yang tidak realistis
+- `PositionRecord` sekarang menyimpan `peakPrice` agar trailing stop bisa bekerja dengan semantik drawdown-from-peak
+- mismatch report/telegram/hotlist contract ditutup sehingga compile/runtime contract smoke test lulus
+
+Validasi yang sudah lulus:
+- `yarn lint`
+- `yarn build`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-regression-2 LOG_DIR=/tmp/mafiamarkets-regression-2/logs TEMP_DIR=/tmp/mafiamarkets-regression-2/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
+
+Bug yang ditemukan dan ditutup pada iterasi ini:
+- trailing-stop branch yang sebelumnya unreachable di `riskEngine.evaluateExit()`
+- arah perhitungan `change24hPct` di `marketWatcher` yang terbalik
+
+Status akhir batch:
+- Batch 3A dianggap selesai sebagai baseline intelligence/history yang sudah benar-benar nyambung ke jalur runtime aktif
+- workers/backtest belum dikerjakan pada iterasi ini
