@@ -1,6 +1,6 @@
 # SESSION_CONTEXT_NEXT
 
-Repository aktif: `https://github.com/bcbcrey-hue/mafiamarkets`
+Repository aktif: `https://github.com/bcbcrey-hue/mafiamarkets-refactor-dua`
 
 Gunakan file ini sebagai konteks cepat sebelum melanjutkan kerja pada sesi berikutnya.
 
