@@ -1,571 +1,182 @@
-# REFACTOR_LOG.md
+# REFACTOR_LOG
 
-## Tujuan dokumen
-Dokumen ini merangkum **progres refactor yang dibahas dan disusun pada sesi ini saja** untuk repository:
+Repository aktif: `https://github.com/bcbcrey-hue/mafiamarkets`
 
-`https://github.com/masreykangtrade-oss/mafiamarkets`
-
-Dokumen ini dibuat untuk dipakai sebagai **konteks kerja di sesi berikutnya** sebelum melanjutkan refactor.
-
-## Status penting
-Seluruh progres di bawah ini adalah:
-- **sudah dirancang**
-- **sudah dijabarkan batch demi batch**
-- **sudah ditulis replacement code/final draft per file di chat ini**
-
-Namun:
-- **belum diterapkan langsung ke repository GitHub pada sesi ini**
-- jadi statusnya adalah **refactor plan + file replacement draft finalized in-session**, bukan commit yang sudah masuk repo
+Dokumen ini adalah **satu sumber kebenaran** untuk status refactor terbaru yang **sudah terimplementasi** di repo aktif. Gunakan dokumen ini sebagai konteks utama untuk sesi berikutnya.
 
 ---
 
-## 1. Batch yang sudah selesai
+## 1. Status project saat ini
+
+Status runtime/backend saat ini:
+- `yarn lint` lulus
+- `yarn build` lulus
+- regression test backend lulus via:
+  `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-regression-2 LOG_DIR=/tmp/mafiamarkets-regression-2/logs TEMP_DIR=/tmp/mafiamarkets-regression-2/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
+
+Jalur runtime aktif yang sekarang berlaku:
+
+`market snapshot -> signal -> feature pipeline -> historical context -> probability -> edge validation -> entry timing -> opportunity -> hotlist -> execution`
+
+Artinya:
+- scanner/market baseline sudah hidup
+- signal/scoring baseline sudah sinkron dengan contract aktif
+- layer intelligence/history/microstructure sudah terhubung ke runtime
+- execution/risk sudah membaca `OpportunityAssessment`, bukan lagi hanya signal baseline
+- persistence sudah menyimpan snapshot, signal, opportunity, dan anomaly event
+
+Fokus yang **belum selesai** saat ini:
+- worker runtime (`src/workers/*`, `src/services/workerPoolService.ts`)
+- backtest engine (`src/domain/backtest/*`)
+- hardening live Indodax execution semantics
+- enrichment report/menu Telegram untuk intelligence report yang lebih kaya
+
+---
+
+## 2. Batch yang sudah selesai
 
 ### Batch 1A — Core contract foundation
-Fokus:
-- menyatukan kontrak konfigurasi runtime
-- menyatukan kontrak type inti lintas sistem
-- menghapus pola config/type lama yang saling bertabrakan
+Selesai.
+
+Hasil utama:
+- `env` dijadikan single source of truth berbasis camelCase
+- `core/types.ts` dijadikan pusat contract aktif lintas runtime
+- pemisahan final ditegaskan:
+  - `SignalCandidate` = output signal/scoring baseline
+  - `OpportunityAssessment` = output intelligence final sebelum execution
 
 ### Batch 1B — Core runtime foundation
-Fokus:
-- membangun ulang storage abstraction
-- menyatukan logger dengan kontrak env baru
-- merapikan scheduler agar type-safe
-- membangun graceful shutdown yang konsisten
+Selesai.
+
+Hasil utama:
+- storage JSON/JSONL dibersihkan
+- logger, scheduler, dan shutdown dibuat type-safe dan konsisten
+- blocker generics/runtime support ditutup
 
 ### Batch 1C — State and persistence layer reset
-Fokus:
-- menyatukan persistence gateway
-- menyatukan runtime state, settings, health, journal
-- menghapus model state/persistence lama yang tidak sinkron
+Selesai.
+
+Hasil utama:
+- persistence gateway tunggal aktif
+- state/settings/health/journal disejajarkan ke contract baru
+- runtime state sekarang menjadi sumber state aktif lintas app
 
 ### Batch 1D — Telegram contract reset
-Fokus:
-- menyatukan auth Telegram
-- menyatukan callback routing
-- menyatukan keyboard contract
-- mempertahankan upload akun legacy JSON
-- menyatukan handler Telegram dengan service contract baru
+Selesai.
 
----
-
-## 2. File yang sudah direfactor
-
-### Batch 1A
-1. `src/config/env.ts`
-2. `src/core/types.ts`
-
-### Batch 1B
-3. `src/storage/jsonStore.ts`
-4. `src/core/logger.ts`
-5. `src/core/scheduler.ts`
-6. `src/core/shutdown.ts`
-
-### Batch 1C
-7. `src/services/persistenceService.ts`
-8. `src/services/stateService.ts`
-9. `src/services/healthService.ts`
-10. `src/services/journalService.ts`
-11. `src/domain/settings/settingsService.ts`
-
-### Batch 1D
-12. `src/integrations/telegram/auth.ts`
-13. `src/integrations/telegram/callbackRouter.ts`
-14. `src/integrations/telegram/keyboards.ts`
-15. `src/integrations/telegram/uploadHandler.ts`
-16. `src/integrations/telegram/handlers.ts`
-17. `src/integrations/telegram/bot.ts`
-
----
-
-## 3. Perubahan utama yang dilakukan pada setiap batch
-
-### Batch 1A — Core contract foundation
-
-#### `src/config/env.ts`
-- dibangun ulang menjadi single source of truth untuk seluruh konfigurasi runtime
-- semua field config disatukan dalam format flat/camelCase
-- ditambahkan parser util untuk string, number, boolean, enum, dan number list
-- dihapus kebutuhan pola lama seperti `env.paths.*`, `env.trading.*`, dan akses field uppercase yang tidak konsisten
-- ditambahkan config awal untuk worker, backtest, scanner, risk, dan threshold probabilitas/spoof
-
-#### `src/core/types.ts`
-- dibangun ulang sebagai kontrak type inti lintas seluruh sistem
-- type disatukan untuk akun, settings, scanner, ticker/orderbook/trade prints, signal, hotlist, microstructure, historical context, opportunity assessment, order/position/trade, runtime state, health, journal, dan backtest
-- dipisahkan dengan jelas:
-  - `SignalCandidate` sebagai output scanner/scoring awal
-  - `OpportunityAssessment` sebagai output intelligence akhir
-- menghapus arah type lama yang saling bentrok
-
-### Batch 1B — Core runtime foundation
-
-#### `src/storage/jsonStore.ts`
-- dibangun ulang sebagai generic `JsonStore<T>` yang valid untuk TypeScript strict
-- ditambahkan helper `read`, `write`, `update`, `reset`, `exists`, `ensureDir`
-- ditambahkan `JsonLinesStore<T>` untuk journal, pair history, anomaly events, dan pattern outcomes
-- menghilangkan blocker lama dari generic/type yang rusak
-
-#### `src/core/logger.ts`
-- logger diselaraskan dengan `env` baru
-- ditambahkan redaction untuk field sensitif seperti `apiKey`, `apiSecret`, `token`, dan header otentikasi
-- ditambahkan helper `createChildLogger()`
-
-#### `src/core/scheduler.ts`
-- dibangun ulang menjadi scheduler ringan yang type-safe
-- kontrak job diperjelas: `name`, `intervalMs`, `run`, `runOnStart`
-- ditambahkan observability status job
-- ditambahkan proteksi overlap job execution
-
-#### `src/core/shutdown.ts`
-- dibangun ulang untuk graceful shutdown yang konsisten
-- ditambahkan `createShutdownManager()` dan `registerShutdown()`
-- mendukung banyak shutdown handler
-- mencegah trigger shutdown ganda
-- lifecycle siap dipakai untuk app, worker, bot, dan persistence flush
-
-### Batch 1C — State and persistence layer reset
-
-#### `src/services/persistenceService.ts`
-- dibangun ulang sebagai gateway tunggal untuk runtime state, settings, health, orders, positions, trades, journal, history, anomaly, dan pattern logs
-- ditambahkan helper default factory:
-  - `createDefaultRuntimeState()`
-  - `createDefaultSettings()`
-  - `createDefaultHealth()`
-- persistence disatukan dengan `JsonStore` dan `JsonLinesStore`
-- ditambahkan helper snapshot untuk hotlist, opportunity, dan backtest log
-
-#### `src/services/stateService.ts`
-- dibangun ulang untuk memegang `RuntimeState` in-memory secara bersih
-- ditambahkan operasi state utama seperti `setStatus`, `setTradingMode`, `setEmergencyStop`, `setPairCooldown`, `markPairSeen`, `setSignals`, `setHotlist`, `setOpportunities`
-- bentuk state lama yang tidak sinkron dihapus
-
-#### `src/services/healthService.ts`
-- dibangun ulang untuk membangun `HealthSnapshot` dari state baru
-- health dihitung berdasarkan runtime status, scanner status, Telegram status, trading status, jumlah pair aktif, open positions, pending orders, dan worker status
-- tidak lagi bergantung pada type lama yang tidak valid
-
-#### `src/services/journalService.ts`
-- dibangun ulang sebagai event journal umum, bukan trade log saja
-- mendukung event `INFO`, `WARN`, `ERROR`, `SIGNAL`, `TRADE`, `POSITION`, `SYSTEM`, `BACKTEST`
-- ditambahkan helper `load`, `list`, `recent`, `append`, `info`, `warn`, `error`
-
-#### `src/domain/settings/settingsService.ts`
-- dibangun ulang agar sinkron dengan `BotSettings` baru
-- ditambahkan operasi granular seperti `setTradingMode`, `patchRisk`, `patchStrategy`, `patchScanner`, `patchWorkers`, `patchBacktest`, `setUiOnly`, `setDryRun`, `setPaperTrade`
-- penggunaan `Partial` lama yang rusak dihilangkan
-
-### Batch 1D — Telegram contract reset
-
-#### `src/integrations/telegram/auth.ts`
-- dibangun ulang agar sinkron dengan `env.telegramAllowedUserIds`
-- ditambahkan helper `isTelegramUserAllowed()` dan `denyTelegramAccess()`
-
-#### `src/integrations/telegram/callbackRouter.ts`
-- dibangun ulang dengan callback payload terstruktur
-- ditambahkan namespace callback: `NAV`, `ACC`, `SET`, `SIG`, `BUY`, `POS`, `EMG`, `BKT`
-- ditambahkan helper `buildCallback()` dan `parseCallback()`
-
-#### `src/integrations/telegram/keyboards.ts`
-- dibangun ulang agar seluruh keyboard konsisten dengan UX final bot
-- menu utama Telegram berbasis tombol ditegaskan sebagai UI utama
-- ditambahkan keyboard untuk main menu, emergency controls, accounts, trading mode, hotlist, dan positions
-- dependency type lama diganti ke type baru seperti `HotlistEntry`, `PositionRecord`, dan `TradingMode`
-
-#### `src/integrations/telegram/uploadHandler.ts`
-- flow upload akun legacy JSON dipertahankan
-- ditambahkan validasi file `.json`
-- file Telegram diunduh dan diparse dengan aman
-- hasil disimpan ke `data/accounts/accounts.json` lewat `AccountStore`
-- registry di-reload setelah upload sukses
-
-#### `src/integrations/telegram/handlers.ts`
-- dibangun ulang agar sinkron dengan service layer baru
-- flow utama Telegram disatukan untuk start bot, stop bot, status, market watch, hotlist, positions, orders, manual buy, manual sell, strategy settings, risk settings, accounts, logs, dan emergency controls
-- callback handling dibuat konsisten untuk upload accounts, reload accounts, ubah trading mode, detail signal, pilih manual buy pair, partial/manual sell position, emergency mode, cancel all orders, dan sell all positions
-- ditambahkan user flow state internal untuk pending upload JSON dan pending manual buy pair
-- dependency terhadap method lama yang sudah tidak ada dihapus
-
-#### `src/integrations/telegram/bot.ts`
-- dibangun ulang sebagai wrapper Telegram yang lebih bersih
-- dependensi Telegram disatukan melalui `TelegramBotDeps`
-- `registerHandlers()` dihubungkan dengan `UploadHandler`
-- start/stop bot diselaraskan dengan contract baru
-
----
-
-## 4. Kontrak final penting yang sudah diputuskan
-
-Hal-hal ini sudah diputuskan sebagai arah final dan harus dipertahankan pada sesi lanjutannya:
-- Telegram **button UI** tetap menjadi UI utama
-- whitelist user tetap berbasis `TELEGRAM_ALLOWED_USER_IDS`
-- legacy upload account tetap diterima dalam format:
-  ```json
-  [
-    { "name": "REY", "apiKey": "ISI_API_KEY", "apiSecret": "ISI_API_SECRET" }
-  ]
-  ```
-- storage akun runtime tetap di:
-  `data/accounts/accounts.json`
-- trading mode tetap:
-  `OFF | ALERT_ONLY | SEMI_AUTO | FULL_AUTO`
-- arsitektur bergerak menuju:
-  **scanner → signal → intelligence → execution**
-- target akhir bot tetap:
-  **mesin intelijen market Indodax yang membaca jejak bandar, memisahkan peluang asli dari jebakan, lalu mengubahnya menjadi keputusan trading yang bisa dijalankan**
-
----
-
-## 5. Belum dikerjakan pada sesi ini
-
-Bagian berikut **belum direfactor di sesi ini**:
-- `src/services/reportService.ts`
-- `src/domain/accounts/accountStore.ts`
-- `src/domain/accounts/accountRegistry.ts`
-- `src/domain/accounts/accountValidator.ts` sanity pass
-- `src/integrations/http/httpClient.ts`
-- `src/integrations/indodax/*`
-- `src/domain/market/*`
-- `src/domain/trading/*`
-- `src/app.ts`
-- `src/bootstrap.ts`
-- seluruh layer intelligence baru
-- worker runtime
-- backtest engine
-- final README dan `.env.example`
-
----
-
-## 6. Titik lanjut paling logis untuk sesi berikutnya
-
-Urutan paling aman setelah progres sesi ini:
-1. `src/services/reportService.ts`
-2. `src/domain/accounts/accountStore.ts`
-3. `src/domain/accounts/accountRegistry.ts`
-4. `src/domain/accounts/accountValidator.ts` sanity pass
-5. `src/app.ts`
-6. `src/bootstrap.ts`
-
-# REFACTOR LOG
-
-Project: mafiamarkets
-Repository: https://github.com/masreykangtrade-oss/mafiamarkets
-
-Fokus log ini:
-- Hanya merangkum progres refactor pada sesi ini
-- Dipakai sebagai konteks untuk sesi berikutnya
-- Tidak mengulang batch lama di luar sesi ini
-
-## Batch yang selesai pada sesi ini
-
-1. Batch 1E — Foundation contract alignment + runtime wiring
-2. Batch 2A — Indodax + market baseline connection
-3. Batch 2B — Market feature builders + scoring alignment
-4. Batch 2C — Trading layer contract reset
-
----
-
-## File yang direfactor pada sesi ini
-
-### Foundation / wiring
-- src/services/reportService.ts
-- src/domain/accounts/accountValidator.ts
-- src/domain/accounts/accountStore.ts
-- src/domain/accounts/accountRegistry.ts
-- src/app.ts
-- src/bootstrap.ts
-
-### Indodax / integrations
-- src/integrations/indodax/publicApi.ts
-- src/integrations/indodax/privateApi.ts
-- src/integrations/indodax/client.ts
-
-### Market pipeline
-- src/domain/market/pairUniverse.ts
-- src/domain/market/marketWatcher.ts
-- src/domain/market/hotlistService.ts
-- src/domain/market/tickerSnapshot.ts
-- src/domain/market/orderbookSnapshot.ts
-- src/domain/market/pairClassifier.ts
-
-### Signal pipeline
-- src/domain/signals/strategies/volumeSpike.ts
-- src/domain/signals/strategies/orderbookImbalance.ts
-- src/domain/signals/strategies/silentAccumulation.ts
-- src/domain/signals/strategies/breakoutRetest.ts
-- src/domain/signals/strategies/hotRotation.ts
-- src/domain/signals/scoreCalculator.ts
-- src/domain/signals/signalEngine.ts
-
-### Trading pipeline
-- src/domain/trading/orderManager.ts
-- src/domain/trading/positionManager.ts
-- src/domain/trading/riskEngine.ts
-- src/domain/trading/executionEngine.ts
-
----
-
-## Ringkasan perubahan per batch
+Hasil utama:
+- auth whitelist tetap aktif
+- callback router, keyboard, upload account JSON, handlers, dan wrapper bot disejajarkan
+- Telegram button UI tetap dipertahankan sebagai UI utama
 
 ### Batch 1E — Foundation contract alignment + runtime wiring
+Selesai.
 
-Tujuan:
-- Menyambungkan semua hasil refactor sebelumnya ke jalur runtime yang lebih konsisten
-- Menutup mismatch contract pada env, accounts, report, app, dan bootstrap
-
-Perubahan utama:
-- Menyelaraskan path env ke pola camelCase aktif seperti:
-  - dataDir
-  - accountsDir
-  - accountsFile
-  - stateDir
-  - historyDir
-  - backtestDir
-  - logDir
-- Mempertahankan keputusan arsitektur yang sudah final:
-  - Telegram button UI tetap jadi UI utama
-  - whitelist TELEGRAM_ALLOWED_USER_IDS tetap dipakai
-  - legacy upload JSON account tetap didukung
-  - runtime accounts tetap disimpan di data/accounts/accounts.json
-- Menulis ulang account validator agar:
-  - validasi legacy upload JSON lebih tegas
-  - nama account dinormalisasi
-  - duplicate account name ditolak
-  - duplicate account id ditolak
-  - default account tetap tunggal dan konsisten
-- Menulis ulang accountStore agar:
-  - storage account sinkron ke env.accountsFile
-  - ada metadata account
-  - mendukung save legacy upload
-  - mendukung replace / upsert / set default / enable-disable / delete
-- Menulis ulang accountRegistry agar:
-  - menjadi façade operasional untuk account runtime
-  - mendukung initialize, reload, loadMeta, saveLegacyUpload, upsertLegacyAccounts, setEnabled, setDefault, delete
-- Menulis ulang reportService untuk output Telegram yang lebih stabil dan sederhana
-- Menulis ulang app.ts sebagai wiring utama runtime
-- Menulis ulang bootstrap.ts agar tipis dan fokus pada startup runtime directories + createApp/start
-
-Status:
-- Batch 1E dianggap selesai sebagai contract alignment baseline
-
----
+Hasil utama:
+- `reportService`, account layer, `app.ts`, dan `bootstrap.ts` disambungkan ke fondasi baru
+- registry account runtime aktif
+- path runtime storage disejajarkan ke env aktif
 
 ### Batch 2A — Indodax + market baseline connection
+Selesai.
 
-Tujuan:
-- Menyambungkan jalur runtime ke sumber data market Indodax
-- Menyiapkan baseline scanner yang benar-benar bisa memberi input ke signal pipeline
-
-Perubahan utama:
-- Menulis ulang publicApi.ts untuk:
-  - getTickers
-  - getDepth
-  - safeGetDepth
-- Menulis ulang privateApi.ts untuk:
-  - getInfo
-  - trade
-  - cancelOrder
-  - openOrders
-  - orderHistory
-- Menulis ulang client.ts untuk:
-  - akses public API
-  - pembuatan private API client per account
-- Menulis ulang pairUniverse.ts untuk:
-  - menyimpan pair metrics terbaru
-  - ranking pair berdasarkan volume
-  - export metrics untuk persistence
-- Menulis ulang marketWatcher.ts untuk:
-  - membangun market snapshot dari ticker + orderbook
-  - menyimpan history price pendek
-  - menghitung spread, liquidity score, change 1m/5m, depth, imbalance
-- Menulis ulang hotlistService.ts sebagai hotlist baseline updater
-- Menyambungkan hasil market snapshot ke jalur scoring awal di runtime
-
-Status:
-- Batch 2A selesai sebagai scanner/market baseline yang sudah nyambung ke app wiring
-
----
+Hasil utama:
+- public/private Indodax baseline aktif
+- `pairUniverse`, `marketWatcher`, dan `hotlistService` terhubung ke app wiring
+- market snapshot baseline sudah tersedia sebagai input signal pipeline
 
 ### Batch 2B — Market feature builders + scoring alignment
+Selesai.
 
-Tujuan:
-- Mengubah placeholder market/scoring layer menjadi feature-driven signal pipeline
-- Menyelaraskan output signal ke type SignalCandidate yang aktif
-
-Perubahan utama:
-- Menulis ulang tickerSnapshot.ts menjadi feature builder yang menghasilkan:
-  - change1m
-  - change3m
-  - change5m
-  - change15m
-  - volume1m
-  - volume3m
-  - volume5m
-  - volume15mAvg
-  - volumeAcceleration
-  - volatilityScore
-  - momentumScore
-- Menulis ulang orderbookSnapshot.ts menjadi feature builder yang menghasilkan:
-  - bestBidSize
-  - bestAskSize
-  - bidDepthTop5
-  - askDepthTop5
-  - bidDepthTop10
-  - askDepthTop10
-  - orderbookImbalance
-  - depthScore
-  - spreadBps
-  - wallPressureScore
-- Menulis ulang pairClassifier.ts untuk:
-  - classify pair
-  - tier
-  - pair class
-  - quote/base asset
-  - regime hint
-- Menulis ulang strategi scoring:
-  - volumeSpike.ts
-  - orderbookImbalance.ts
-  - silentAccumulation.ts
-  - breakoutRetest.ts
-  - hotRotation.ts
-- Menulis ulang scoreCalculator.ts untuk menghasilkan:
-  - total score
-  - regime
-  - confidence
-  - breakoutPressure
-  - volumeAcceleration
-  - orderbookImbalance
-  - spreadPct
-  - reasons
-  - warnings
-  - contributions
-- Menulis ulang signalEngine.ts agar:
-  - menerima market snapshot bundle
-  - membangun ticker features + orderbook features
-  - menjalankan calculateScore
-  - mengembalikan SignalCandidate yang sesuai dengan core/types aktif
-
-Status:
-- Batch 2B selesai sebagai baseline signal/scoring pipeline yang sudah lebih sesuai dengan type aktif
-
----
+Hasil utama:
+- ticker features dan orderbook features aktif
+- classifier pair/tier/regime hint aktif
+- scoring strategy baseline dipecah per feature
+- `signalEngine` sinkron ke `SignalCandidate` aktif
 
 ### Batch 2C — Trading layer contract reset
+Selesai.
 
-Tujuan:
-- Menyelaraskan seluruh trading layer ke type aktif
-- Menghubungkan hasil signal 2B ke jalur order/position/risk/execution
-
-Perubahan utama:
-- Menulis ulang orderManager.ts agar:
-  - memakai OrderRecord aktif
-  - status order uppercase
-  - mendukung create, update, markOpen, markPartiallyFilled, markFilled, cancel, reject, cancelAll
-- Menulis ulang positionManager.ts agar:
-  - memakai PositionRecord aktif
-  - mendukung open
-  - updateMark
-  - closePartial
-  - forceClose
-- Menulis ulang riskEngine.ts agar:
-  - memakai SignalCandidate aktif
-  - memakai BotSettings aktif
-  - mengecek spread, confidence, score, max open positions, max position size, cooldown, anti-spoof threshold
-  - membangun stopLossPrice dan takeProfitPrice
-  - mengevaluasi exit position
-- Menulis ulang executionEngine.ts agar:
-  - terhubung ke accountRegistry
-  - settingsService
-  - stateService
-  - riskEngine
-  - IndodaxClient
-  - positionManager
-  - orderManager
-  - journalService
-  - mendukung auto buy
-  - mendukung manual order
-  - mendukung manual sell
-  - mendukung evaluateOpenPositions
-  - mendukung cancelAllOrders
-  - mendukung sellAllPositions
-- Menambahkan bridge sementara inferEntryPrice() karena SignalCandidate aktif belum membawa payload harga entry yang eksplisit
-
-Status:
-- Batch 2C selesai sebagai trading baseline yang sudah nyambung ke hasil 2B
-
----
-
-## Catatan penting hasil sesi ini
-
-1. Semua hasil refactor pada sesi ini diposisikan sebagai jalur runtime yang saling terhubung:
-   app/bootstrap -> market -> signal -> trading
-
-2. Keputusan yang harus tetap dijaga:
-- Telegram button UI tetap utama
-- whitelist user tetap aktif
-- legacy upload JSON accounts tetap didukung
-- account runtime tetap di data/accounts/accounts.json
-- src/app.ts tetap menjadi wiring utama
-
-3. Mismatch besar yang sudah ditutup pada sesi ini:
-- env contract lama vs camelCase env aktif
-- account layer lama vs runtime account store baru
-- signal output lama vs SignalCandidate aktif
-- trading layer lama vs OrderRecord/PositionRecord/BotSettings aktif
-
-4. Keterbatasan yang masih tersisa:
-- SignalCandidate saat ini belum membawa execution-ready entry price yang eksplisit
-- inferEntryPrice() masih bridge sementara
-- intelligence / microstructure / history / backtest / workers belum direfactor pada sesi ini
-
----
-
-## Next target untuk sesi berikutnya
-
-Prioritas lanjutan:
-1. Batch 3A
-   - domain/intelligence/*
-   - domain/microstructure/*
-   - domain/history/*
-
-2. Batch 3B
-   - workers/*
-   - domain/backtest/*
-
-Tujuan batch berikutnya:
-- menambahkan validasi signal yang lebih matang
-- menilai trap/spoof/cluster/flow
-- menghubungkan scoring ke opportunity/execution-quality decision
-- mengurangi ketergantungan pada inferEntryPrice() bridge sementara
-Setelah itu baru lanjut ke:
-- `src/integrations/http/httpClient.ts`
-- `src/integrations/indodax/*`
-- `src/domain/market/*`
-- `src/domain/trading/*`
-
-Lalu batch berikutnya:
-- intelligence engine
-- historical context
-- worker runtime
-- backtest engine
-
----
-
-## 7. Ringkasan singkat satu paragraf
-Pada sesi ini, refactor yang berhasil disusun sampai tuntas baru mencakup fondasi kontrak inti, runtime core, persistence/state/settings/health/journal, dan reset kontrak Telegram. Semua perubahan sudah dijabarkan sebagai replacement draft final per file, tetapi belum diterapkan langsung ke repo GitHub. Sesi berikutnya paling logis melanjutkan `reportService`, layer accounts, lalu `app.ts` dan `bootstrap.ts` agar wiring utama bot mulai sinkron dengan fondasi baru.
-
----
-
-## Batch lanjutan yang selesai pada iterasi ini
+Hasil utama:
+- order/position/risk/execution disejajarkan ke contract aktif
+- auto/manual execution baseline tersedia
+- cancel-all / sell-all tersedia
 
 ### Batch 3A — Intelligence/history runtime integration + contract finalization
+Selesai.
 
-Tujuan:
-- menyambungkan jalur runtime dari market baseline ke `OpportunityAssessment`
-- menutup mismatch contract aktif yang masih tertinggal di app/runtime/report/telegram/execution
-- menambahkan persistence history/anomaly yang benar-benar dipakai jalur runtime
+Hasil utama:
+- layer baru `microstructure`, `history`, dan `intelligence` ditambahkan dan disambungkan ke runtime
+- `OpportunityAssessment` difinalkan sebagai contract aktif sebelum execution
+- hotlist sekarang bisa diranking dari output opportunity
+- persistence JSONL untuk snapshot/signal/opportunity/anomaly event sudah dipakai runtime
+- `PositionRecord` menyimpan `peakPrice` agar trailing stop valid
+- mismatch support files / utils / report / telegram contract yang tersisa sudah ditutup
 
-File baru:
+---
+
+## 3. File yang berubah
+
+### Batch 1A
+- `src/config/env.ts`
+- `src/core/types.ts`
+
+### Batch 1B
+- `src/storage/jsonStore.ts`
+- `src/core/logger.ts`
+- `src/core/scheduler.ts`
+- `src/core/shutdown.ts`
+
+### Batch 1C
+- `src/services/persistenceService.ts`
+- `src/services/stateService.ts`
+- `src/services/healthService.ts`
+- `src/services/journalService.ts`
+- `src/domain/settings/settingsService.ts`
+
+### Batch 1D
+- `src/integrations/telegram/auth.ts`
+- `src/integrations/telegram/callbackRouter.ts`
+- `src/integrations/telegram/keyboards.ts`
+- `src/integrations/telegram/uploadHandler.ts`
+- `src/integrations/telegram/handlers.ts`
+- `src/integrations/telegram/bot.ts`
+
+### Batch 1E
+- `src/services/reportService.ts`
+- `src/domain/accounts/accountValidator.ts`
+- `src/domain/accounts/accountStore.ts`
+- `src/domain/accounts/accountRegistry.ts`
+- `src/app.ts`
+- `src/bootstrap.ts`
+
+### Batch 2A
+- `src/integrations/indodax/publicApi.ts`
+- `src/integrations/indodax/privateApi.ts`
+- `src/integrations/indodax/client.ts`
+- `src/domain/market/pairUniverse.ts`
+- `src/domain/market/marketWatcher.ts`
+- `src/domain/market/hotlistService.ts`
+
+### Batch 2B
+- `src/domain/market/tickerSnapshot.ts`
+- `src/domain/market/orderbookSnapshot.ts`
+- `src/domain/market/pairClassifier.ts`
+- `src/domain/signals/strategies/volumeSpike.ts`
+- `src/domain/signals/strategies/orderbookImbalance.ts`
+- `src/domain/signals/strategies/silentAccumulation.ts`
+- `src/domain/signals/strategies/breakoutRetest.ts`
+- `src/domain/signals/strategies/hotRotation.ts`
+- `src/domain/signals/scoreCalculator.ts`
+- `src/domain/signals/signalEngine.ts`
+
+### Batch 2C
+- `src/domain/trading/orderManager.ts`
+- `src/domain/trading/positionManager.ts`
+- `src/domain/trading/riskEngine.ts`
+- `src/domain/trading/executionEngine.ts`
+
+### Batch 3A — file baru
 - `src/utils/math.ts`
 - `src/domain/microstructure/accumulationDetector.ts`
 - `src/domain/microstructure/spoofDetector.ts`
@@ -583,10 +194,17 @@ File baru:
 - `src/domain/intelligence/opportunityEngine.ts`
 - `tests/runtime_backend_regression.ts`
 
-File patch utama:
+### Batch 3A — file support/contract sync yang dipatch lagi
+- `tsconfig.json`
+- `src/utils/time.ts`
+- `src/utils/retry.ts`
+- `src/utils/validators.ts`
+- `src/core/metrics.ts`
+- `src/services/pollingService.ts`
+- `src/integrations/http/httpClient.ts`
+- `src/integrations/indodax/mapper.ts`
 - `src/app.ts`
 - `src/core/types.ts`
-- `src/storage/jsonStore.ts`
 - `src/services/persistenceService.ts`
 - `src/services/stateService.ts`
 - `src/services/reportService.ts`
@@ -599,34 +217,127 @@ File patch utama:
 - `src/domain/trading/positionManager.ts`
 - `src/integrations/telegram/handlers.ts`
 - `src/integrations/indodax/privateApi.ts`
-- `src/integrations/http/httpClient.ts`
-- `src/integrations/indodax/mapper.ts`
-- `src/utils/validators.ts`
-- `src/utils/time.ts`
-- `src/utils/retry.ts`
-- `src/core/metrics.ts`
-- `src/services/pollingService.ts`
-- `tsconfig.json`
 
-Hasil utama:
-- `SignalCandidate` difinalkan agar membawa konteks runtime yang benar-benar dipakai (`marketPrice`, `bestBid`, `bestAsk`, `liquidityScore`, `change1m`, `change5m`, `contributions`)
-- `OpportunityAssessment` dijadikan contract aktif sebelum execution, lengkap dengan probability, edge validation, timing, risk context, historical match summary, dan harga referensi
-- app wiring sekarang benar-benar mengalir:
-  `market snapshot -> signal -> feature pipeline -> historical context -> probability -> edge validation -> entry timing -> opportunity -> hotlist -> execution`
-- history runtime sekarang menyimpan snapshot, signal, opportunity, dan anomaly event ke persistence JSONL
-- `ExecutionEngine` dan `RiskEngine` sekarang membaca contract opportunity aktif, tidak lagi bergantung pada bridge entry price yang tidak realistis
-- `PositionRecord` sekarang menyimpan `peakPrice` agar trailing stop bisa bekerja dengan semantik drawdown-from-peak
-- mismatch report/telegram/hotlist contract ditutup sehingga compile/runtime contract smoke test lulus
+---
 
-Validasi yang sudah lulus:
-- `yarn lint`
-- `yarn build`
-- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-regression-2 LOG_DIR=/tmp/mafiamarkets-regression-2/logs TEMP_DIR=/tmp/mafiamarkets-regression-2/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
+## 4. Keputusan arsitektur / final contract yang harus dipertahankan
 
-Bug yang ditemukan dan ditutup pada iterasi ini:
-- trailing-stop branch yang sebelumnya unreachable di `riskEngine.evaluateExit()`
-- arah perhitungan `change24hPct` di `marketWatcher` yang terbalik
+Keputusan arsitektur final:
+- Telegram **button UI** tetap menjadi UI utama
+- whitelist user tetap berbasis `TELEGRAM_ALLOWED_USER_IDS`
+- legacy upload account JSON tetap didukung dalam format:
+  ```json
+  [
+    { "name": "REY", "apiKey": "ISI_API_KEY", "apiSecret": "ISI_API_SECRET" }
+  ]
+  ```
+- runtime accounts tetap disimpan di:
+  `data/accounts/accounts.json`
+- mode trading tetap:
+  `OFF | ALERT_ONLY | SEMI_AUTO | FULL_AUTO`
+- `src/app.ts` tetap menjadi wiring utama runtime
+- arsitektur final yang sekarang berlaku:
+  `scanner -> signal -> intelligence -> execution`
 
-Status akhir batch:
-- Batch 3A dianggap selesai sebagai baseline intelligence/history yang sudah benar-benar nyambung ke jalur runtime aktif
-- workers/backtest belum dikerjakan pada iterasi ini
+Contract aktif yang wajib dipertahankan:
+
+### `SignalCandidate`
+Harus dipertahankan sebagai output signal baseline yang sudah membawa konteks runtime berikut:
+- `score`
+- `confidence`
+- `regime`
+- `breakoutPressure`
+- `volumeAcceleration`
+- `orderbookImbalance`
+- `spreadPct`
+- `marketPrice`
+- `bestBid`
+- `bestAsk`
+- `liquidityScore`
+- `change1m`
+- `change5m`
+- `contributions`
+
+### `OpportunityAssessment`
+Harus dipertahankan sebagai contract final sebelum execution, minimal dengan informasi:
+- `rawScore`
+- `finalScore`
+- `pumpProbability`
+- `continuationProbability`
+- `trapProbability`
+- `spoofRisk`
+- `edgeValid`
+- `marketRegime`
+- `entryTiming`
+- `recommendedAction`
+- `riskContext`
+- `historicalMatchSummary`
+- `referencePrice`
+- `bestBid`
+- `bestAsk`
+- `spreadPct`
+- `liquidityScore`
+
+### `PositionRecord`
+Harus mempertahankan `peakPrice` karena trailing stop sekarang bergantung pada drawdown dari peak, bukan lagi formula lama yang tidak valid.
+
+---
+
+## 5. Blocker / bug yang sudah ditutup
+
+Blocker/bug penting yang sudah ditutup sampai status terbaru:
+- compile blocker lintas support files (`tsconfig`, retry/time/validators/metrics/http/mapper)
+- mismatch contract antara `app.ts`, `PersistenceService`, `StateService`, `HotlistService`, `ReportService`, dan Telegram handlers
+- mismatch antara market snapshot baseline vs signal engine input
+- mismatch antara signal baseline vs execution/risk contract aktif
+- `markTrade()` missing pada state runtime
+- constructor mismatch pada `AccountStore` / `JsonStore`
+- generic constraint `JsonLinesStore` yang terlalu sempit untuk journal entry
+- formula `inferEntryPrice()` yang tidak realistis sudah dieliminasi dari jalur execution aktif
+- trailing-stop branch yang sebelumnya unreachable di `src/domain/trading/riskEngine.ts`
+- arah perhitungan `change24hPct` yang terbalik di `src/domain/market/marketWatcher.ts`
+
+---
+
+## 6. Backlog yang belum selesai
+
+Belum selesai dan tetap menjadi backlog aktif:
+- `src/workers/*`
+- `src/services/workerPoolService.ts`
+- `src/domain/backtest/*`
+- enrichment report Telegram:
+  - Intelligence Report
+  - Spoof Radar
+  - Pattern Match
+  - Backtest Summary
+- hardening live integration Indodax:
+  - response mapping live order
+  - fill / partial fill semantics
+  - cancel lifecycle
+  - sinkronisasi order live vs runtime state
+- final README dan `.env.example` yang sepenuhnya sinkron dengan contract aktif terbaru
+
+---
+
+## 7. Next target paling logis
+
+Prioritas paling logis berikutnya adalah **Batch 3B**:
+
+1. `src/workers/*`
+2. `src/services/workerPoolService.ts`
+3. `src/domain/backtest/*`
+
+Tujuan Batch 3B:
+- memindahkan analitik berat ke worker runtime
+- menambahkan replay/backtest untuk memvalidasi stack signal-intelligence
+- menjaga agar main runtime tetap ringan saat market scan berjalan
+
+Setelah Batch 3B stabil, lanjut ke:
+- hardening live Indodax execution
+- enrichment report/menu Telegram berbasis output opportunity
+
+---
+
+## 8. Ringkasan satu paragraf
+
+Repo aktif `bcbcrey-hue/mafiamarkets` sekarang sudah berada pada status refactor terimplementasi yang konsisten dari fondasi contract, runtime core, persistence/state, Telegram, wiring app, market baseline, signal pipeline, trading baseline, sampai intelligence/history runtime. Status lama yang menyatakan refactor “baru draft/belum diterapkan” **tidak lagi berlaku**. Sumber kebenaran yang harus dipakai ke depan adalah state runtime aktif saat ini: `scanner -> signal -> intelligence -> execution`, dengan `OpportunityAssessment` sebagai contract final sebelum execution dan Batch 3B sebagai target lanjut paling logis.

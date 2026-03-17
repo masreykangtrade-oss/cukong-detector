@@ -21,6 +21,7 @@ Gunakan informasi repo GitHub mafiamarkets, REFACTOR_LOG.md, SESSION_CONTEXT_NEX
 - Penyelarasan persistence/state/report/telegram/hotlist/execution/risk terhadap contract aktif terbaru.
 - Perbaikan bug trailing stop unreachable dan perhitungan `change24hPct` yang terbalik.
 - Penambahan regression test backend: `tests/runtime_backend_regression.ts`.
+- `REFACTOR_LOG.md` dan `SESSION_CONTEXT_NEXT.md` dibersihkan menjadi status final yang konsisten untuk repo aktif `bcbcrey-hue/mafiamarkets`.
 
 ## Prioritized Backlog
 ### P0
