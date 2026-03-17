@@ -1,6 +1,6 @@
 # REFACTOR_LOG
 
-Repository aktif: `https://github.com/bcbcrey-hue/mafiamarkets`
+Repository aktif: `https://github.com/bcbcrey-hue/mafiamarkets-refactor-dua`
 
 Dokumen ini adalah **satu sumber kebenaran** untuk status refactor terbaru yang **sudah terimplementasi** di repo aktif. Gunakan dokumen ini sebagai konteks utama untuk sesi berikutnya.
 
