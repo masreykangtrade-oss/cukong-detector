@@ -1,7 +1,6 @@
 # SESSION CONTEXT NEXT
 
-Project: mafiamarkets
-Repository: https://github.com/masreykangtrade-oss/mafiamarkets
+Repository: https://github.com/bcbcrey-hue/mafiamarkets
 
 Gunakan file ini sebagai konteks utama sebelum melanjutkan refactor pada sesi berikutnya.
 
