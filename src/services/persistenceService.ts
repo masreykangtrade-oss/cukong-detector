@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '../config/env';
 import type {
@@ -306,5 +306,30 @@ export class PersistenceService {
       payload: result as unknown as Record<string, unknown>,
       createdAt: new Date().toISOString(),
     });
+  }
+
+  async listBacktestResults(): Promise<BacktestRunResult[]> {
+    try {
+      await mkdir(env.backtestDir, { recursive: true });
+      const files = (await readdir(env.backtestDir))
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => path.resolve(env.backtestDir, file));
+
+      const results = await Promise.all(
+        files.map(async (filePath) => {
+          const raw = await readFile(filePath, 'utf8');
+          return JSON.parse(raw) as BacktestRunResult;
+        }),
+      );
+
+      return results.sort((a, b) => b.finishedAt.localeCompare(a.finishedAt));
+    } catch {
+      return [];
+    }
+  }
+
+  async readLatestBacktestResult(): Promise<BacktestRunResult | null> {
+    const results = await this.listBacktestResults();
+    return results[0] ?? null;
   }
 }

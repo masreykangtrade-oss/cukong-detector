@@ -23,9 +23,11 @@ Gunakan informasi repo GitHub mafiamarkets, REFACTOR_LOG.md, SESSION_CONTEXT_NEX
 - Penambahan regression test backend: `tests/runtime_backend_regression.ts`.
 - `REFACTOR_LOG.md` dan `SESSION_CONTEXT_NEXT.md` dibersihkan menjadi status final yang konsisten untuk repo aktif `bcbcrey-hue/mafiamarkets`.
 - Batch 3B ditambahkan: `WorkerPoolService`, worker runtime (`feature`, `pattern`, `backtest`), `BacktestEngine`, replay loader, metrics, persist hasil backtest, dan recovery timeout worker pool.
+- Hook operasional Telegram ditambahkan untuk `Intelligence Report`, `Spoof Radar`, `Pattern Match`, dan `Backtest` beserta render summary di `ReportService`.
 
 ## Prioritized Backlog
 ### P0
+- Hardening live Indodax order semantics (respons, fill behavior, sell quantity mapping, cancellation lifecycle).
 - Hardening live Indodax order semantics (respons, fill behavior, sell quantity mapping, cancellation lifecycle).
 - Integrasi report Telegram untuk intelligence/backtest output yang lebih operasional.
 - Sinkronisasi lifecycle worker/backtest dengan flow operasional app/Telegram.
@@ -42,5 +44,5 @@ Gunakan informasi repo GitHub mafiamarkets, REFACTOR_LOG.md, SESSION_CONTEXT_NEX
 
 ## Next Tasks
 1. Hardening live execution path Indodax setelah worker/backtest baseline siap.
-2. Perkaya report Telegram untuk menampilkan opportunity reasoning, spoof risk, pattern match, dan backtest summary.
-3. Tambahkan hook operasional untuk menjalankan backtest dari flow aplikasi/Telegram.
+2. Finalisasi README dan `.env.example` mengikuti contract aktif terbaru.
+3. Enrichment lanjutan Telegram bila dibutuhkan (kontrol backtest granular dan outcome historis lebih detail).

@@ -2,6 +2,7 @@ import type { Telegraf } from 'telegraf';
 import { Telegraf as TelegrafBot } from 'telegraf';
 import { env } from '../../config/env';
 import { AccountRegistry } from '../../domain/accounts/accountRegistry';
+import { BacktestEngine } from '../../domain/backtest/backtestEngine';
 import { AccountStore } from '../../domain/accounts/accountStore';
 import { HotlistService } from '../../domain/market/hotlistService';
 import { ExecutionEngine } from '../../domain/trading/executionEngine';
@@ -27,6 +28,7 @@ export interface TelegramBotDeps {
   settings: SettingsService;
   execution: ExecutionEngine;
   journal: JournalService;
+  backtest: BacktestEngine;
 }
 
 export class TelegramBot {

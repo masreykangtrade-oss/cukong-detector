@@ -267,4 +267,8 @@ export class BacktestEngine {
     await this.persistence.saveBacktestResult(result);
     return result;
   }
+
+  latestResult(): Promise<BacktestRunResult | null> {
+    return this.persistence.readLatestBacktestResult();
+  }
 }

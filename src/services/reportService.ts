@@ -1,4 +1,5 @@
 import type {
+  BacktestRunResult,
   HealthSnapshot,
   HotlistEntry,
   OpportunityAssessment,
@@ -207,6 +208,81 @@ export class ReportService {
     );
 
     return ['👤 ACCOUNTS', ...lines].join('\n');
+  }
+
+  intelligenceReportText(opportunities: OpportunityAssessment[]): string {
+    if (!opportunities.length) {
+      return '🧠 Belum ada opportunity aktif.';
+    }
+
+    const lines = opportunities.slice(0, 8).map((item, index) =>
+      [
+        `${index + 1}. ${item.pair}`,
+        `final=${asNum(item.finalScore, 1)}`,
+        `pump=${(item.pumpProbability * 100).toFixed(1)}%`,
+        `trap=${(item.trapProbability * 100).toFixed(1)}%`,
+        `timing=${item.entryTiming.state}`,
+        `action=${item.recommendedAction}`,
+      ].join(' | '),
+    );
+
+    return ['🧠 INTELLIGENCE REPORT', ...lines].join('\n');
+  }
+
+  spoofRadarText(opportunities: OpportunityAssessment[]): string {
+    const risky = opportunities
+      .filter((item) => item.spoofRisk >= 0.35 || item.trapProbability >= 0.35)
+      .sort((a, b) => b.spoofRisk - a.spoofRisk);
+
+    if (!risky.length) {
+      return '🕳️ Spoof radar bersih. Belum ada pair dengan spoof/trap risk tinggi.';
+    }
+
+    const lines = risky.slice(0, 8).map((item, index) =>
+      [
+        `${index + 1}. ${item.pair}`,
+        `spoof=${(item.spoofRisk * 100).toFixed(1)}%`,
+        `trap=${(item.trapProbability * 100).toFixed(1)}%`,
+        `warning=${truncate(item.warnings.join('; ') || '-', 120)}`,
+      ].join(' | '),
+    );
+
+    return ['🕳️ SPOOF RADAR', ...lines].join('\n');
+  }
+
+  patternMatchText(opportunities: OpportunityAssessment[]): string {
+    if (!opportunities.length) {
+      return '🧬 Belum ada pattern match aktif.';
+    }
+
+    const lines = opportunities.slice(0, 8).map((item, index) =>
+      [
+        `${index + 1}. ${item.pair}`,
+        `regime=${item.marketRegime}`,
+        `pattern=${truncate(item.historicalMatchSummary, 120)}`,
+      ].join(' | '),
+    );
+
+    return ['🧬 PATTERN MATCH', ...lines].join('\n');
+  }
+
+  backtestSummaryText(result: BacktestRunResult | null): string {
+    if (!result) {
+      return '🧪 Belum ada hasil backtest tersimpan.';
+    }
+
+    return [
+      '🧪 BACKTEST SUMMARY',
+      `runId=${result.runId}`,
+      `pairs=${result.pairsTested.join(', ') || '-'}`,
+      `signals=${result.signalsGenerated}`,
+      `entries=${result.entriesTaken}`,
+      `exits=${result.exitsTaken}`,
+      `wins=${result.wins}`,
+      `losses=${result.losses}`,
+      `netPnl=${asNum(result.netPnl, 2)}`,
+      `notes=${truncate(result.notes.join('; ') || '-', 220)}`,
+    ].join('\n');
   }
 
   healthText(health: HealthSnapshot): string {

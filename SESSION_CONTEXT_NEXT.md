@@ -16,6 +16,7 @@ Status yang harus dianggap benar:
 - jalur runtime aktif sekarang adalah:
   `market snapshot -> signal -> feature pipeline -> historical context -> probability -> edge validation -> entry timing -> opportunity -> hotlist -> execution`
 - worker runtime dan backtest baseline sudah tersedia
+- hook Telegram untuk intelligence report, spoof radar, pattern match, dan backtest summary sudah tersedia
 
 Jangan lagi memakai asumsi lama bahwa progres masih berupa draft atau belum diterapkan.
 
@@ -34,6 +35,7 @@ Sudah selesai dan harus dianggap baseline:
 - Batch 2C — Trading layer contract reset
 - Batch 3A — Intelligence/history runtime integration + contract finalization
 - Batch 3B — Worker runtime + backtest baseline
+- Batch 3C — Telegram intelligence/backtest operational hooks
 
 ---
 
@@ -55,6 +57,7 @@ Contract aktif yang wajib dipertahankan:
 - hotlist boleh diranking dari output opportunity, bukan hanya signal baseline
 - hasil backtest disimpan ke `data/backtest/*.json`
 - worker pool memprioritaskan `dist/workers/*.js` bila hasil build tersedia
+- Telegram sudah punya hook operasional untuk intelligence/backtest; jangan rollback UX ini tanpa alasan kuat
 
 ---
 
@@ -76,11 +79,6 @@ Sudah ditutup, jangan diulang kecuali ada bug baru nyata:
 
 Masih belum selesai:
 - hardening live Indodax execution semantics
-- enrichment report/menu Telegram:
-  - Intelligence Report
-  - Spoof Radar
-  - Pattern Match
-  - Backtest Summary
 - final README / `.env.example`
 
 ---
@@ -90,8 +88,8 @@ Masih belum selesai:
 Mulai langsung dari hardening tahap berikutnya:
 
 1. hardening live Indodax execution
-2. enrichment report/menu Telegram berbasis output opportunity
-3. finalisasi README / `.env.example`
+2. finalisasi README / `.env.example`
+3. enrichment Telegram lanjutan bila dibutuhkan
 
 Target praktis berikutnya:
 - sinkronkan live order lifecycle dengan runtime state

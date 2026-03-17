@@ -8,6 +8,10 @@ export const TELEGRAM_MENU = {
   STATUS: '📊 Status',
   MARKET_WATCH: '👁️ Market Watch',
   HOTLIST: '🔥 Hotlist',
+  INTELLIGENCE: '🧠 Intelligence Report',
+  SPOOF: '🕳️ Spoof Radar',
+  PATTERN: '🧬 Pattern Match',
+  BACKTEST: '🧪 Backtest',
   POSITIONS: '📦 Positions',
   ORDERS: '🧾 Orders',
   MANUAL_BUY: '🟢 Manual Buy',
@@ -22,9 +26,10 @@ export const TELEGRAM_MENU = {
 export const mainMenuKeyboard = Markup.keyboard([
   [TELEGRAM_MENU.START, TELEGRAM_MENU.STOP, TELEGRAM_MENU.STATUS],
   [TELEGRAM_MENU.MARKET_WATCH, TELEGRAM_MENU.HOTLIST, TELEGRAM_MENU.POSITIONS],
+  [TELEGRAM_MENU.INTELLIGENCE, TELEGRAM_MENU.SPOOF, TELEGRAM_MENU.PATTERN],
   [TELEGRAM_MENU.ORDERS, TELEGRAM_MENU.MANUAL_BUY, TELEGRAM_MENU.MANUAL_SELL],
   [TELEGRAM_MENU.STRATEGY, TELEGRAM_MENU.RISK, TELEGRAM_MENU.ACCOUNTS],
-  [TELEGRAM_MENU.LOGS, TELEGRAM_MENU.EMERGENCY],
+  [TELEGRAM_MENU.BACKTEST, TELEGRAM_MENU.LOGS, TELEGRAM_MENU.EMERGENCY],
 ]).resize();
 
 export const emergencyKeyboard = Markup.inlineKeyboard([
@@ -109,4 +114,17 @@ export function positionsKeyboard(positions: PositionRecord[]) {
       ],
     ]),
   );
+}
+
+export function backtestKeyboard(currentPair?: string) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback(
+        currentPair ? `Run Top Pair (${currentPair})` : 'Run Top Pair',
+        buildCallback({ namespace: 'BKT', action: 'RUN_TOP', pair: currentPair }),
+      ),
+    ],
+    [Markup.button.callback('Run All Recent', buildCallback({ namespace: 'BKT', action: 'RUN_ALL' }))],
+    [Markup.button.callback('Last Result', buildCallback({ namespace: 'BKT', action: 'LAST' }))],
+  ]);
 }

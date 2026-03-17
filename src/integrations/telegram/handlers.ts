@@ -6,6 +6,7 @@ import type {
   TradingMode,
 } from '../../core/types';
 import { AccountRegistry } from '../../domain/accounts/accountRegistry';
+import { BacktestEngine } from '../../domain/backtest/backtestEngine';
 import { HotlistService } from '../../domain/market/hotlistService';
 import { ExecutionEngine } from '../../domain/trading/executionEngine';
 import { OrderManager } from '../../domain/trading/orderManager';
@@ -20,6 +21,7 @@ import { parseCallback } from './callbackRouter';
 import {
   TELEGRAM_MENU,
   accountsKeyboard,
+  backtestKeyboard,
   emergencyKeyboard,
   hotlistKeyboard,
   mainMenuKeyboard,
@@ -40,6 +42,7 @@ interface HandlerDeps {
   execution: ExecutionEngine;
   journal: JournalService;
   uploadHandler: UploadHandler;
+  backtest: BacktestEngine;
 }
 
 interface UserFlowState {
@@ -174,6 +177,7 @@ export function registerHandlers(bot: Telegraf, deps: HandlerDeps): void {
         health,
         activeAccounts: deps.accounts.listEnabled().length,
         topSignal: deps.hotlist.list()[0],
+        topOpportunity: deps.state.get().lastOpportunities[0],
       }),
       mainMenuKeyboard,
     );
@@ -188,6 +192,30 @@ export function registerHandlers(bot: Telegraf, deps: HandlerDeps): void {
   bot.hears(TELEGRAM_MENU.MARKET_WATCH, async (ctx) => {
     if (await denyTelegramAccess(ctx)) return;
     await ctx.reply(deps.report.marketWatchText(deps.hotlist.list()), mainMenuKeyboard);
+  });
+
+  bot.hears(TELEGRAM_MENU.INTELLIGENCE, async (ctx) => {
+    if (await denyTelegramAccess(ctx)) return;
+    await ctx.reply(
+      deps.report.intelligenceReportText(deps.state.get().lastOpportunities),
+      mainMenuKeyboard,
+    );
+  });
+
+  bot.hears(TELEGRAM_MENU.SPOOF, async (ctx) => {
+    if (await denyTelegramAccess(ctx)) return;
+    await ctx.reply(
+      deps.report.spoofRadarText(deps.state.get().lastOpportunities),
+      mainMenuKeyboard,
+    );
+  });
+
+  bot.hears(TELEGRAM_MENU.PATTERN, async (ctx) => {
+    if (await denyTelegramAccess(ctx)) return;
+    await ctx.reply(
+      deps.report.patternMatchText(deps.state.get().lastOpportunities),
+      mainMenuKeyboard,
+    );
   });
 
   bot.hears(TELEGRAM_MENU.POSITIONS, async (ctx) => {
@@ -252,6 +280,12 @@ export function registerHandlers(bot: Telegraf, deps: HandlerDeps): void {
   bot.hears(TELEGRAM_MENU.LOGS, async (ctx) => {
     if (await denyTelegramAccess(ctx)) return;
     await ctx.reply(renderLogsText(deps.journal), mainMenuKeyboard);
+  });
+
+  bot.hears(TELEGRAM_MENU.BACKTEST, async (ctx) => {
+    if (await denyTelegramAccess(ctx)) return;
+    const topPair = deps.state.get().lastOpportunities[0]?.pair;
+    await ctx.reply('Backtest controls:', backtestKeyboard(topPair));
   });
 
   bot.hears(TELEGRAM_MENU.EMERGENCY, async (ctx) => {
@@ -375,6 +409,39 @@ export function registerHandlers(bot: Telegraf, deps: HandlerDeps): void {
 
     if (parsed.namespace === 'EMG' && parsed.action === 'SELL_ALL') {
       await ctx.reply(await deps.execution.sellAllPositions());
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    if (parsed.namespace === 'BKT' && parsed.action === 'RUN_TOP') {
+      const topPair = parsed.pair ?? deps.state.get().lastOpportunities[0]?.pair;
+      const result = await deps.backtest.run(
+        {
+          pair: topPair,
+          maxEvents: 300,
+        },
+        deps.settings.get(),
+      );
+      await ctx.reply(deps.report.backtestSummaryText(result), mainMenuKeyboard);
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    if (parsed.namespace === 'BKT' && parsed.action === 'RUN_ALL') {
+      const result = await deps.backtest.run(
+        {
+          maxEvents: 500,
+        },
+        deps.settings.get(),
+      );
+      await ctx.reply(deps.report.backtestSummaryText(result), mainMenuKeyboard);
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    if (parsed.namespace === 'BKT' && parsed.action === 'LAST') {
+      const latest = await deps.backtest.latestResult();
+      await ctx.reply(deps.report.backtestSummaryText(latest), mainMenuKeyboard);
       await ctx.answerCbQuery();
       return;
     }

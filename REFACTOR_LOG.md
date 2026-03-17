@@ -27,7 +27,7 @@ Artinya:
 
 Fokus yang **belum selesai** saat ini:
 - hardening live Indodax execution semantics
-- enrichment report/menu Telegram untuk intelligence report yang lebih kaya
+- final README dan `.env.example` yang benar-benar sinkron dengan contract aktif
 
 ---
 
@@ -121,6 +121,15 @@ Hasil utama:
 - `BacktestEngine` dapat load replay dari pair-history JSONL, menjalankan replay signal->opportunity, dan menyimpan hasil ke `data/backtest/*.json`
 - app runtime sekarang membawa lifecycle worker (start/stop) dan worker health snapshot ke heartbeat
 - regression test backend sekarang mencakup worker pool, backtest replay, persist file hasil, dan probe timeout recovery
+
+### Batch 3C — Telegram intelligence/backtest operational hooks
+Selesai.
+
+Hasil utama:
+- menu Telegram untuk `Intelligence Report`, `Spoof Radar`, `Pattern Match`, dan `Backtest` sudah aktif
+- `ReportService` sekarang dapat merender intelligence report, spoof radar, pattern match, dan backtest summary
+- `BacktestEngine` sudah dihubungkan ke flow Telegram untuk run top pair, run all recent, dan lihat hasil terakhir
+- `STATUS` sekarang bisa ikut membawa `topOpportunity`
 
 ---
 
@@ -241,6 +250,15 @@ Hasil utama:
 - `tests/runtime_backend_regression.ts`
 - `tests/worker_timeout_probe.ts`
 
+### Batch 3C
+- `src/services/reportService.ts`
+- `src/integrations/telegram/keyboards.ts`
+- `src/integrations/telegram/handlers.ts`
+- `src/integrations/telegram/bot.ts`
+- `src/app.ts`
+- `src/domain/backtest/backtestEngine.ts`
+- `src/services/persistenceService.ts`
+
 ---
 
 ## 4. Keputusan arsitektur / final contract yang harus dipertahankan
@@ -326,11 +344,6 @@ Blocker/bug penting yang sudah ditutup sampai status terbaru:
 ## 6. Backlog yang belum selesai
 
 Belum selesai dan tetap menjadi backlog aktif:
-- enrichment report Telegram:
-  - Intelligence Report
-  - Spoof Radar
-  - Pattern Match
-  - Backtest Summary
 - hardening live integration Indodax:
   - response mapping live order
   - fill / partial fill semantics
@@ -349,15 +362,13 @@ Prioritas paling logis berikutnya adalah **hardening live integration + intellig
    - fill / partial fill semantics
    - cancel lifecycle
    - sinkronisasi order live vs runtime state
-2. enrichment report/menu Telegram berbasis output opportunity
-   - Intelligence Report
-   - Spoof Radar
-   - Pattern Match
-   - Backtest Summary
-3. finalisasi README dan `.env.example` sesuai contract aktif terbaru
+2. finalisasi README dan `.env.example` sesuai contract aktif terbaru
+3. enrichment lanjutan Telegram bila diperlukan:
+   - kontrol backtest yang lebih granular
+   - ringkasan outcome historis yang lebih detail
 
 ---
 
 ## 8. Ringkasan satu paragraf
 
-Repo aktif `bcbcrey-hue/mafiamarkets` sekarang sudah berada pada status refactor terimplementasi yang konsisten dari fondasi contract, runtime core, persistence/state, Telegram, wiring app, market baseline, signal pipeline, trading baseline, intelligence/history runtime, sampai worker runtime dan backtest baseline. Status lama yang menyatakan refactor “baru draft/belum diterapkan” **tidak lagi berlaku**. Sumber kebenaran yang harus dipakai ke depan adalah state runtime aktif saat ini: `scanner -> signal -> intelligence -> execution`, dengan `OpportunityAssessment` sebagai contract final sebelum execution, worker/backtest baseline sudah tersedia, dan fokus berikutnya bergeser ke live hardening + report integration.
+Repo aktif `bcbcrey-hue/mafiamarkets` sekarang sudah berada pada status refactor terimplementasi yang konsisten dari fondasi contract, runtime core, persistence/state, Telegram, wiring app, market baseline, signal pipeline, trading baseline, intelligence/history runtime, worker runtime, backtest baseline, sampai hook operasional Telegram untuk intelligence/backtest. Status lama yang menyatakan refactor “baru draft/belum diterapkan” **tidak lagi berlaku**. Sumber kebenaran yang harus dipakai ke depan adalah state runtime aktif saat ini: `scanner -> signal -> intelligence -> execution`, dengan `OpportunityAssessment` sebagai contract final sebelum execution dan fokus berikutnya bergeser ke hardening live Indodax.

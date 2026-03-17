@@ -6,6 +6,7 @@ import { env } from './config/env';
 import { AccountRegistry } from './domain/accounts/accountRegistry';
 import { PairHistoryStore } from './domain/history/pairHistoryStore';
 import { OpportunityEngine } from './domain/intelligence/opportunityEngine';
+import { BacktestEngine } from './domain/backtest/backtestEngine';
 import { WorkerPoolService } from './services/workerPoolService';
 import { AccountStore } from './domain/accounts/accountStore';
 import { HotlistService } from './domain/market/hotlistService';
@@ -79,6 +80,7 @@ export async function createApp(): Promise<AppRuntime> {
   );
   const hotlistService = new HotlistService();
   const riskEngine = new RiskEngine();
+  const backtest = new BacktestEngine(persistence, workerPool);
 
   const executionEngine = new ExecutionEngine(
     accountRegistry,
@@ -103,6 +105,7 @@ export async function createApp(): Promise<AppRuntime> {
     settings,
     execution: executionEngine,
     journal,
+    backtest,
   });
 
   polling.register('market-scan', env.pollingIntervalMs, async () => {
