@@ -2,114 +2,110 @@
 
 Repository aktif: `https://github.com/bcbcrey-hue/mafiamarkets-refactor-dua`
 
-Gunakan file ini sebagai konteks cepat sebelum melanjutkan kerja pada sesi berikutnya.
+Gunakan file ini sebagai konteks cepat yang **sinkron penuh** dengan `REFACTOR_LOG.md`.
 
 ---
 
-## 1. Posisi project saat ini
+## 1. Posisi project yang harus dianggap benar
 
-Status yang harus dianggap benar:
-- refactor utama **sudah terimplementasi** di repo aktif
+Status aktual repo:
+- refactor utama backend **sudah terimplementasi**, bukan draft
 - `yarn lint` lulus
 - `yarn build` lulus
-- regression test backend lulus
-- jalur runtime aktif sekarang adalah:
-  `market snapshot -> signal -> feature pipeline -> historical context -> probability -> edge validation -> entry timing -> opportunity -> hotlist -> execution`
-- worker runtime dan backtest baseline sudah tersedia
-- hook Telegram untuk intelligence report, spoof radar, pattern match, dan backtest summary sudah tersedia
+- `tests/runtime_backend_regression.ts` lulus
+- `tests/worker_timeout_probe.ts` lulus
+- runtime utama berlaku:
+  `tickers + depth -> MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
+- worker runtime untuk `feature`, `pattern`, dan `backtest` sudah ada
+- hook Telegram untuk `Intelligence Report`, `Spoof Radar`, `Pattern Match`, dan `Backtest` sudah aktif
 
-Jangan lagi memakai asumsi lama bahwa progres masih berupa draft atau belum diterapkan.
-
----
-
-## 2. Batch yang sudah selesai
-
-Sudah selesai dan harus dianggap baseline:
-- Batch 1A — Core contract foundation
-- Batch 1B — Core runtime foundation
-- Batch 1C — State and persistence reset
-- Batch 1D — Telegram contract reset
-- Batch 1E — Foundation alignment + runtime wiring
-- Batch 2A — Indodax + market baseline
-- Batch 2B — Market feature builders + scoring alignment
-- Batch 2C — Trading layer contract reset
-- Batch 3A — Intelligence/history runtime integration + contract finalization
-- Batch 3B — Worker runtime + backtest baseline
-- Batch 3C — Telegram intelligence/backtest operational hooks
+Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 
 ---
 
-## 3. Contract dan keputusan arsitektur yang wajib dipertahankan
+## 2. Truth penting per modul
 
-Keputusan arsitektur:
+### Market / scanner
+- `MarketWatcher` memakai ticker + depth Indodax
+- `recentTrades` masih inferred dari delta volume lokal, belum native trade stream
+- `PairUniverse` sudah membawa `high24h` / `low24h` dari ticker exchange
+
+### Signal / intelligence
+- `SignalCandidate` adalah output signal baseline
+- `OpportunityAssessment` adalah contract final sebelum execution
+- hotlist diranking dari opportunity output
+
+### Trading / execution
+- trailing stop sudah valid karena memakai `peakPrice`
+- flow simulasi buy/sell lengkap dan persist ke state
+- live buy baru baseline
+- live sell, partial fill, cancel reconciliation, dan sinkronisasi runtime-vs-exchange **belum selesai**
+
+### Telegram
 - Telegram button UI tetap UI utama
 - whitelist `TELEGRAM_ALLOWED_USER_IDS` tetap aktif
-- legacy upload account JSON tetap didukung
-- runtime accounts tetap di `data/accounts/accounts.json`
-- `src/app.ts` tetap wiring utama runtime
-- arsitektur final yang berlaku:
-  `scanner -> signal -> intelligence -> execution`
+- upload legacy account JSON tetap didukung
+- START/STOP di Telegram mengubah state runtime, bukan bootstrap ulang proses aplikasi
 
-Contract aktif yang wajib dipertahankan:
-- `SignalCandidate` sudah diperkaya dengan harga, liquidity, perubahan singkat, dan score contributions
-- `OpportunityAssessment` adalah contract final sebelum execution
-- `PositionRecord` menyimpan `peakPrice` untuk trailing stop
-- hotlist boleh diranking dari output opportunity, bukan hanya signal baseline
-- hasil backtest disimpan ke `data/backtest/*.json`
-- worker pool memprioritaskan `dist/workers/*.js` bila hasil build tersedia
-- Telegram sudah punya hook operasional untuk intelligence/backtest; jangan rollback UX ini tanpa alasan kuat
+### Worker / backtest
+- feature worker bisa dipakai di runtime utama
+- pattern worker tersedia dan lolos regression, tetapi matching live path utama masih inline
+- backtest replay dari pair-history JSONL sudah aktif dan persist hasil ke `data/backtest/*.json`
 
 ---
 
-## 4. Hal yang sudah ditutup
+## 3. Hal yang sudah ditutup, jangan diulang
 
-Sudah ditutup, jangan diulang kecuali ada bug baru nyata:
-- compile blocker support files / TypeScript config
-- mismatch app ↔ persistence ↔ state ↔ hotlist ↔ report ↔ telegram contracts
-- mismatch market snapshot ↔ signal engine
-- mismatch signal baseline ↔ risk/execution
-- formula entry price bridge lama yang tidak realistis
+- compile blocker TypeScript/support files
+- mismatch contract app ↔ persistence ↔ state ↔ hotlist ↔ report ↔ Telegram ↔ execution
 - trailing-stop unreachable logic
 - arah `change24hPct` yang terbalik
-- worker timeout deadlock / pool starvation risk
+- timeout deadlock / starvation pada worker pool
+- sinkronisasi base URL Indodax ke env di entry client
 
 ---
 
-## 5. Fokus backlog yang belum selesai
+## 4. Backlog aktif yang nyata
 
-Masih belum selesai:
-- hardening live Indodax execution semantics
-- final README / `.env.example`
+### P0
+- hardening live Indodax execution end-to-end
+- sell live path
+- partial fill / fill confirmation
+- cancel lifecycle exchange
+- sinkronisasi runtime state dengan state order exchange
 
----
+### P1
+- pindahkan pattern matching live path ke worker runtime jika perlu offload konsisten
+- bedakan lebih tegas simulated vs optimistic-live vs confirmed-live outcome
+- upgrade trade-flow bila ada sumber trade print native
 
-## 6. Next target paling logis
-
-Mulai langsung dari hardening tahap berikutnya:
-
-1. hardening live Indodax execution
-2. finalisasi README / `.env.example`
-3. enrichment Telegram lanjutan bila dibutuhkan
-
-Target praktis berikutnya:
-- sinkronkan live order lifecycle dengan runtime state
-- tampilkan reasoning opportunity / spoof risk / pattern match / backtest summary di Telegram
-- rapikan dokumentasi runtime aktif agar onboarding sesi berikutnya makin cepat
+### P2
+- final README root
+- final `.env.example`
 
 ---
 
-## 7. Rule kerja sesi berikutnya
+## 5. Next target paling logis
+
+1. hardening live execution semantics Indodax
+2. finalisasi README dan `.env.example`
+3. baru setelah itu, pengayaan intelligence/Telegram lanjutan bila memang dibutuhkan
+
+---
+
+## 6. Rule kerja sesi berikutnya
 
 - jangan mengulang batch lama yang sudah selesai
-- jangan campurkan lagi status lama vs status implementasi terbaru
-- jika ada mismatch baru, prioritaskan contract aktif yang sekarang berlaku
-- prioritaskan kestabilan runtime, konsistensi contract, dan koneksi antar modul
-- gunakan `REFACTOR_LOG.md` sebagai sumber detail, file ini sebagai ringkasan operasional cepat
+- jangan campur status lama dengan status implementasi terbaru
+- jika ada mismatch baru, utamakan implementasi aktual repo + blueprint
+- jangan overclaim live execution sudah selesai
+- gunakan `REFACTOR_LOG.md` sebagai sumber detail dan file ini sebagai ringkasan eksekusi cepat
 
 ---
 
-## 8. Validasi cepat yang bisa dipakai ulang
+## 7. Validasi cepat yang bisa dipakai ulang
 
 - `yarn lint`
 - `yarn build`
-- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-regression-2 LOG_DIR=/tmp/mafiamarkets-regression-2/logs TEMP_DIR=/tmp/mafiamarkets-regression-2/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-regression LOG_DIR=/tmp/mafiamarkets-audit-regression/logs TEMP_DIR=/tmp/mafiamarkets-audit-regression/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-timeout LOG_DIR=/tmp/mafiamarkets-audit-timeout/logs TEMP_DIR=/tmp/mafiamarkets-audit-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts`

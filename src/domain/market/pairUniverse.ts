@@ -5,6 +5,8 @@ export interface PairMetricSnapshot {
   lastPrice: number;
   bestBid: number;
   bestAsk: number;
+  high24h: number;
+  low24h: number;
   volumeIdr: number;
   volumeBtc: number;
   serverTime: number;
@@ -23,6 +25,8 @@ export class PairUniverse {
         lastPrice: ticker.last,
         bestBid: ticker.buy,
         bestAsk: ticker.sell,
+        high24h: ticker.high,
+        low24h: ticker.low,
         volumeIdr: ticker.vol_idr,
         volumeBtc: ticker.vol_btc,
         serverTime: ticker.server_time,

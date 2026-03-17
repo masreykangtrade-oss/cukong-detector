@@ -165,8 +165,8 @@ export class MarketWatcher {
           lastPrice: item.lastPrice,
           bid: item.bestBid,
           ask: item.bestAsk,
-          high24h: item.lastPrice,
-          low24h: item.lastPrice,
+          high24h: item.high24h,
+          low24h: item.low24h,
           volume24hBase: item.volumeBtc,
           volume24hQuote: item.volumeIdr,
           change24hPct: 0,
@@ -188,10 +188,6 @@ export class MarketWatcher {
           pair: item.pair,
           ticker: {
             ...ticker,
-            high24h: Math.max(item.lastPrice, item.bestAsk, item.bestBid),
-            low24h:
-              Math.min(...[item.lastPrice, item.bestAsk, item.bestBid].filter((value) => value > 0)) ||
-              item.lastPrice,
             change24hPct: this.percentChange(
               ticker.lastPrice,
               ticker.low24h || ticker.lastPrice,
@@ -201,9 +197,6 @@ export class MarketWatcher {
           recentTrades,
           timestamp,
         });
-
-        void prev1m;
-        void prev5m;
       } catch (error) {
         logger.warn({ pair: item.pair, error }, 'failed to build market snapshot');
       }

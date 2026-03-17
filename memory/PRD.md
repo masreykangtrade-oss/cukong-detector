@@ -1,48 +1,47 @@
-# PRD.md
+# PRD
 
 ## Original Problem Statement
-Gunakan informasi repo GitHub mafiamarkets, REFACTOR_LOG.md, SESSION_CONTEXT_NEXT.md, dan mafiamarkets-blueprint.md sebagai konteks utama. Audit setiap file terutama logic inti, jangan mengulang refactor yang sudah tercatat kecuali diperlukan sebagai penghubung implementasi nyata, ikuti arsitektur blueprint, dan prioritaskan implementasi backend/business logic inti yang benar-benar nyambung end-to-end: state, market watcher, signal/scoring, opportunity/intelligence, risk, execution, persistence, dan wiring app.
+Gunakan informasi repo GitHub mafiamarkets-refactor-dua, REFACTOR_LOG.md, SESSION_CONTEXT_NEXT.md, dan mafiamarkets-blueprint.md sebagai konteks utama dan sumber kebenaran. Audit seluruh struktur repository dan setiap file yang relevan, prioritaskan logic inti, alur trading, state, persistence, telegram flow, execution flow, dan keterhubungan antar modul. Jika ada mismatch antara implementasi repo, REFACTOR_LOG.md, SESSION_CONTEXT_NEXT.md, dan blueprint, utamakan implementasi aktual repo + blueprint lalu revisi dokumennya agar konsisten. Bersihkan REFACTOR_LOG.md menjadi satu log final yang akurat dan sinkronkan SESSION_CONTEXT_NEXT.md terhadapnya.
 
 ## Architecture Decisions
-- Menetapkan `OpportunityAssessment` sebagai contract aktif sebelum execution, bukan lagi mengandalkan signal baseline langsung.
-- Menambahkan layer `microstructure`, `history`, dan `intelligence` agar runtime flow sesuai blueprint: market -> signal -> opportunity -> execution.
-- Menyimpan snapshot/signal/opportunity/anomaly ke persistence JSONL untuk historical context dan audit trail runtime.
-- Menyelaraskan `SignalCandidate` agar membawa harga, likuiditas, perubahan singkat, dan kontribusi skor yang dipakai downstream.
-- Menambahkan `peakPrice` pada `PositionRecord` untuk trailing stop yang benar-benar bisa berjalan.
+- Mempertahankan arsitektur final `scanner -> signal -> intelligence -> execution` dengan `src/app.ts` sebagai wiring utama runtime.
+- Menetapkan `SignalCandidate` sebagai output baseline scoring dan `OpportunityAssessment` sebagai contract final sebelum execution.
+- Mempertahankan Telegram button UI, whitelist `TELEGRAM_ALLOWED_USER_IDS`, format legacy upload account JSON, storage account di `data/accounts/accounts.json`, dan mode trading `OFF | ALERT_ONLY | SEMI_AUTO | FULL_AUTO`.
+- Menjaga persistence berbasis JSON/JSONL untuk state, orders, positions, trades, journal, pair history, anomaly events, pattern outcomes, dan backtest results.
+- Mempertahankan worker runtime untuk feature/pattern/backtest dan backtest replay berbasis pair-history JSONL.
 
 ## What Has Been Implemented
-- Perbaikan blocker compile TypeScript di config/util/http/mapper/runtime support files hingga `yarn lint` dan `yarn build` lulus.
-- Implementasi layer baru:
-  - `src/domain/microstructure/*`
-  - `src/domain/history/*`
-  - `src/domain/intelligence/*`
-- Rewire `src/app.ts` agar jalur runtime aktif menjadi:
-  `market snapshot -> signal -> feature pipeline -> historical context -> probability -> edge validation -> entry timing -> opportunity -> hotlist -> execution`
-- Penyelarasan persistence/state/report/telegram/hotlist/execution/risk terhadap contract aktif terbaru.
-- Perbaikan bug trailing stop unreachable dan perhitungan `change24hPct` yang terbalik.
-- Penambahan regression test backend: `tests/runtime_backend_regression.ts`.
-- `REFACTOR_LOG.md` dan `SESSION_CONTEXT_NEXT.md` dibersihkan menjadi status final yang konsisten untuk repo aktif `bcbcrey-hue/mafiamarkets`.
-- Batch 3B ditambahkan: `WorkerPoolService`, worker runtime (`feature`, `pattern`, `backtest`), `BacktestEngine`, replay loader, metrics, persist hasil backtest, dan recovery timeout worker pool.
-- Hook operasional Telegram ditambahkan untuk `Intelligence Report`, `Spoof Radar`, `Pattern Match`, dan `Backtest` beserta render summary di `ReportService`.
+- Audit repo inti selesai pada layer core, services, market, signals, intelligence, history, microstructure, trading, telegram, workers, backtest, tests, dan dokumen root.
+- `REFACTOR_LOG.md` dibersihkan menjadi log final yang akurat berdasarkan implementasi aktual repo, bukan status draft lama.
+- `SESSION_CONTEXT_NEXT.md` diperbarui agar sinkron penuh dengan `REFACTOR_LOG.md`.
+- Penyelarasan kecil implementasi dilakukan pada market/Indodax path:
+  - `PairUniverse` sekarang membawa `high24h` / `low24h` dari ticker exchange.
+  - `MarketWatcher` memakai nilai 24h tersebut untuk snapshot aktif.
+  - `IndodaxClient` sekarang mengambil base URL public/private dari `env`.
+- Status validasi terbaru sudah diverifikasi:
+  - `yarn lint` lulus
+  - `yarn build` lulus
+  - `tests/runtime_backend_regression.ts` lulus
+  - `tests/worker_timeout_probe.ts` lulus
 
 ## Prioritized Backlog
 ### P0
-- Hardening live Indodax order semantics (respons, fill behavior, sell quantity mapping, cancellation lifecycle).
-- Hardening live Indodax order semantics (respons, fill behavior, sell quantity mapping, cancellation lifecycle).
-- Integrasi report Telegram untuk intelligence/backtest output yang lebih operasional.
-- Sinkronisasi lifecycle worker/backtest dengan flow operasional app/Telegram.
+- Hardening live Indodax execution end-to-end.
+- Response mapping live order, fill / partial fill semantics, dan cancel lifecycle exchange.
+- Sinkronisasi runtime order/position state dengan state order exchange.
+- Live sell path yang benar-benar terhubung ke exchange.
 
 ### P1
-- Tambah intelligence report / spoof radar / pattern match di Telegram handlers & report service.
-- Persist pattern outcomes trading real untuk memperkaya `recentWinRate` dan `falseBreakRate`.
-- Tambah monitoring state/health yang lebih kaya untuk worker dan opportunity pipeline.
+- Pindahkan pattern matching pada live path ke worker runtime bila dibutuhkan untuk konsistensi offload CPU.
+- Bedakan simulated vs optimistic-live vs confirmed-live execution outcome dengan lebih eksplisit.
+- Upgrade trade-flow dari inferred flow ke native trade stream jika sumber data memungkinkan.
 
 ### P2
-- Enrichment similarity engine dan regime tagging yang lebih tajam.
-- Optimasi batching market watcher agar lebih hemat I/O/network.
-- Dokumentasi README dan `.env.example` final sesuai contract aktif.
+- Finalisasi README root.
+- Finalisasi `.env.example`.
+- Rapikan runbook onboarding dan dokumentasi operasional harian.
 
 ## Next Tasks
-1. Hardening live execution path Indodax setelah worker/backtest baseline siap.
-2. Finalisasi README dan `.env.example` mengikuti contract aktif terbaru.
-3. Enrichment lanjutan Telegram bila dibutuhkan (kontrol backtest granular dan outcome historis lebih detail).
+1. Kerjakan hardening live execution Indodax terlebih dahulu.
+2. Setelah itu finalisasi README dan `.env.example` sesuai contract aktif.
+3. Baru lanjut ke pengayaan intelligence/Telegram bila memang diperlukan.
