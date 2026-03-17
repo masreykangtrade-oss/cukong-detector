@@ -9,16 +9,20 @@ Gunakan file ini sebagai konteks cepat yang **sinkron penuh** dengan `REFACTOR_L
 ## 1. Posisi project yang harus dianggap benar
 
 Status aktual repo:
+
 - refactor utama backend **sudah terimplementasi**, bukan draft
 - `yarn lint` lulus
 - `yarn build` lulus
 - `tests/runtime_backend_regression.ts` lulus
 - `tests/worker_timeout_probe.ts` lulus
 - `tests/live_execution_hardening_probe.ts` lulus
+- `tests/execution_summary_failed_probe.ts` lulus
+- testing agent iteration 6 pass tanpa issue backend
 - runtime utama berlaku:
   `tickers + depth -> MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
 - worker runtime untuk `feature`, `pattern`, dan `backtest` sudah ada
 - hook Telegram untuk `Intelligence Report`, `Spoof Radar`, `Pattern Match`, dan `Backtest` sudah aktif
+- `README.md` dan `.env.example` sudah final sesuai implementasi repo saat ini
 
 Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 
@@ -27,40 +31,52 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 ## 2. Truth penting per modul
 
 ### Market / scanner
+
 - `MarketWatcher` memakai ticker + depth Indodax
 - `recentTrades` masih inferred dari delta volume lokal, belum native trade stream
 - `PairUniverse` sudah membawa `high24h` / `low24h` dari ticker exchange
 
 ### Signal / intelligence
+
 - `SignalCandidate` adalah output signal baseline
 - `OpportunityAssessment` adalah contract final sebelum execution
 - hotlist diranking dari opportunity output
 
-### Trading / execution
-- trailing stop sudah valid karena memakai `peakPrice`
+### Trading / execution / summary
+
+- trailing stop valid karena memakai `peakPrice`
 - flow simulasi buy/sell lengkap dan persist ke state
 - live buy / sell / cancel baseline sudah ada
-- order live menyimpan `exchangeOrderId` dan disinkronkan lewat `getOrder(...)`
-- startup sekarang memanggil `recoverLiveOrdersOnStartup()` untuk order live aktif yang tersisa
-- sync aktif memakai `openOrders()` dulu lalu fallback ke `getOrder()`
-- `position-monitor` sekarang memanggil `syncActiveOrders()` sebelum evaluasi exit
-- duplicate active BUY/SELL guard sudah aktif
-- repeated partial fill BUY sekarang sudah merge ke satu posisi logis per pair/account
-- BUY default sekarang aggressive limit dari `bestAsk` + slippage bps aman; order buy yang stale bisa dibatalkan oleh timeout policy
-- fee / executed trade count / weighted average fill sekarang ditarik dari exchange saat `tradeHistory` tersedia
-- default take profit sekarang 15% dan bisa diubah dari Telegram
-- yang belum final: fallback accounting saat detail trade exchange tidak tersedia, plus edge-case recovery tertentu setelah restart
+- order live menyimpan `exchangeOrderId` dan disinkronkan lewat `openOrders()` lalu fallback `getOrder()`
+- startup memanggil `recoverLiveOrdersOnStartup()` untuk order live aktif yang tersisa
+- `position-monitor` memanggil `syncActiveOrders()` sebelum evaluasi exit
+- duplicate active BUY/SELL guard aktif
+- repeated partial fill BUY sudah merge ke satu posisi logis per pair/account
+- BUY default aggressive limit dari `bestAsk` + slippage bps aman; order buy stale bisa dibatalkan timeout policy
+- fee / executed trade count / weighted average fill ditarik dari exchange saat `tradeHistory` tersedia
+- default take profit 15% bisa diubah dari Telegram
+- execution summary aktif untuk BUY/SELL submitted, partially filled, filled, canceled, failed
+- trade outcome summary final aktif hanya saat posisi benar-benar `CLOSED`
+- accuracy label summary yang aktif: `SIMULATED`, `OPTIMISTIC_LIVE`, `PARTIAL_LIVE`, `CONFIRMED_LIVE`
+- persistence summary ada di:
+  - `data/history/execution-summaries.jsonl`
+  - `data/history/trade-outcomes.jsonl`
+- yang belum final: fallback accounting saat detail trade exchange tidak tersedia, plus edge-case recovery restart tertentu
 
 ### Telegram
+
 - Telegram button UI tetap UI utama
 - whitelist `TELEGRAM_ALLOWED_USER_IDS` tetap aktif
 - upload legacy account JSON tetap didukung
 - START/STOP di Telegram mengubah state runtime, bukan bootstrap ulang proses aplikasi
+- `TelegramBot.broadcast()` dipakai sebagai jalur push summary ke allowed users
+- delivery Telegram live belum divalidasi end-to-end pada sesi ini karena memang diminta skip
 
 ### Worker / backtest
+
 - feature worker bisa dipakai di runtime utama
 - pattern worker tersedia dan lolos regression, tetapi matching live path utama masih inline
-- backtest replay dari pair-history JSONL sudah aktif dan persist hasil ke `data/backtest/*.json`
+- backtest replay dari pair-history JSONL aktif dan persist hasil ke `data/backtest/*.json`
 
 ---
 
@@ -74,32 +90,37 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - sinkronisasi base URL Indodax ke env di entry client
 - baseline live order sync / cancel / duplicate-guard
 - merge partial BUY fill + aggressive BUY policy + Telegram TP/slippage config
+- execution summary + trade outcome summary baseline
+- finalisasi `README.md` + `.env.example`
 
 ---
 
 ## 4. Backlog aktif yang nyata
 
 ### P0
-- fallback accounting saat detail trade exchange tidak tersedia
+
+- fallback accounting saat detail trade exchange tidak tersedia penuh
 - recovery restart untuk skenario partial fill / cancel / close yang lebih lengkap
 - verifikasi sumber trade exchange resmi tambahan bila dokumentasi resmi berubah di masa depan
 
 ### P1
+
 - pindahkan pattern matching live path ke worker runtime jika perlu offload konsisten
-- bedakan lebih tegas simulated vs optimistic-live vs confirmed-live outcome
 - upgrade trade-flow bila ada sumber trade print native
+- pecah `executionEngine.ts` menjadi modul lebih kecil setelah P0 aman
 
 ### P2
-- final README root
-- final `.env.example`
+
+- verifikasi end-to-end Telegram live delivery saat validasi live diizinkan
+- pengayaan runbook operasional tambahan bila diperlukan
 
 ---
 
 ## 5. Next target paling logis
 
-1. hardening live execution semantics Indodax
-2. finalisasi README dan `.env.example`
-3. baru setelah itu, pengayaan intelligence/Telegram lanjutan bila memang dibutuhkan
+1. hardening edge-case recovery restart order live
+2. fallback accounting untuk detail fee/executed trade yang parsial
+3. baru setelah itu refactor modular `executionEngine.ts` bila memang perlu
 
 ---
 
@@ -108,7 +129,7 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - jangan mengulang batch lama yang sudah selesai
 - jangan campur status lama dengan status implementasi terbaru
 - jika ada mismatch baru, utamakan implementasi aktual repo + blueprint
-- jangan overclaim live execution sudah selesai
+- jangan overclaim live execution sudah selesai total
 - gunakan `REFACTOR_LOG.md` sebagai sumber detail dan file ini sebagai ringkasan eksekusi cepat
 
 ---
@@ -119,5 +140,5 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - `yarn build`
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-regression LOG_DIR=/tmp/mafiamarkets-audit-regression/logs TEMP_DIR=/tmp/mafiamarkets-audit-regression/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-timeout LOG_DIR=/tmp/mafiamarkets-audit-timeout/logs TEMP_DIR=/tmp/mafiamarkets-audit-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts`
-- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-recovery-probe-r5 LOG_DIR=/tmp/mafiamarkets-recovery-probe-r5/logs TEMP_DIR=/tmp/mafiamarkets-recovery-probe-r5/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
-- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-p0-live-probe-r4 LOG_DIR=/tmp/mafiamarkets-p0-live-probe-r4/logs TEMP_DIR=/tmp/mafiamarkets-p0-live-probe-r4/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-live-hardening-probe-self LOG_DIR=/tmp/mafiamarkets-live-hardening-probe-self/logs TEMP_DIR=/tmp/mafiamarkets-live-hardening-probe-self/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it6-failed-self LOG_DIR=/tmp/mafiamarkets-it6-failed-self/logs TEMP_DIR=/tmp/mafiamarkets-it6-failed-self/tmp yarn tsx /app/tests/execution_summary_failed_probe.ts`
