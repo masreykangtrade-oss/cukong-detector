@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export interface IndodaxPrivateApiOptions {
-  baseUrl?: string;
+  baseUrl: string;
   apiKey: string;
   apiSecret: string;
 }
@@ -54,7 +54,7 @@ export class PrivateApi {
   private readonly apiSecret: string;
 
   constructor(options: IndodaxPrivateApiOptions) {
-    this.baseUrl = options.baseUrl ?? 'https://indodax.com/tapi';
+    this.baseUrl = options.baseUrl;
     this.apiKey = options.apiKey;
     this.apiSecret = options.apiSecret;
   }

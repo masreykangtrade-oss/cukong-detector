@@ -17,6 +17,7 @@ Validasi yang sudah diverifikasi pada repo lokal:
   `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-timeout LOG_DIR=/tmp/mafiamarkets-audit-timeout/logs TEMP_DIR=/tmp/mafiamarkets-audit-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts`
 - probe live execution hardening lulus via:
   `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-live-hardening-probe-self LOG_DIR=/tmp/mafiamarkets-live-hardening-probe-self/logs TEMP_DIR=/tmp/mafiamarkets-live-hardening-probe-self/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
+- startup recovery + openOrders reconciliation juga sudah diverifikasi lagi via test report iteration 4
 
 Jalur runtime aktual yang berlaku sekarang:
 
@@ -31,7 +32,7 @@ Catatan penting tentang status aktual:
 - backtest replay sudah berjalan dari pair-history JSONL dan menyimpan hasil ke `data/backtest/*.json`
 
 Hal yang **belum selesai** dan jangan di-overclaim:
-- hardening live order semantics Indodax **sudah naik dari baseline lama**, tetapi reconciliation lanjutan masih belum sepenuhnya end-to-end
+- hardening live order semantics Indodax **sudah naik dari baseline lama**, termasuk startup recovery dan openOrders-first reconciliation, tetapi reconciliation lanjutan masih belum sepenuhnya end-to-end
 - repeated partial fill buy saat ini masih bisa tercatat sebagai slice posisi tambahan, belum diagregasi menjadi satu posisi logis per pair/account
 - fee, trade history exchange, dan recovery setelah restart belum dipakai penuh sebagai sumber rekonsiliasi akhir
 - `recentTrades` pada runtime masih **inferred flow** dari delta volume lokal, belum trade print native exchange
@@ -109,6 +110,8 @@ Catatan audit penting:
 - flow simulasi buy/sell sudah lengkap: order terbuat, fill ditandai, posisi dibuka/ditutup, journal ditulis, `tradeCount` naik, cooldown pair di-set.
 - `OrderRecord` sekarang bisa menyimpan metadata live exchange: `exchangeOrderId`, `exchangeStatus`, `exchangeUpdatedAt`, dan `relatedPositionId`.
 - `ExecutionEngine.syncActiveOrders()` sudah ada dan dipanggil oleh `position-monitor` loop di `src/app.ts` sebelum evaluasi exit.
+- `ExecutionEngine.recoverLiveOrdersOnStartup()` sekarang dipanggil saat start untuk menyinkronkan active live orders yang tersisa dari sesi sebelumnya.
+- `syncActiveOrders()` sekarang mencoba `openOrders()` dulu per account lalu fallback ke `getOrder()` untuk order yang belum terselesaikan.
 
 Catatan batas implementasi live yang harus dipahami dengan benar:
 - live **buy** baseline sudah ada melalui `PrivateApi.trade(...)`
@@ -117,6 +120,7 @@ Catatan batas implementasi live yang harus dipahami dengan benar:
 - `cancelAllOrders()` sekarang mencoba `cancelOrder(...)` ke exchange untuk order aktif yang punya `exchangeOrderId`
 - duplicate guard sudah ada untuk mencegah BUY aktif ganda pada pair/account yang sama dan SELL aktif ganda pada posisi yang sama
 - partial fill delta sekarang bisa diaplikasikan ke runtime position melalui `syncActiveOrders()`, tetapi agregasi posisi buy berulang masih belum final
+- base URL public/private Indodax sekarang efektif dipaksa lewat env wiring, bukan diandalkan dari fallback default constructor
 
 ### 3.6 Telegram flow
 - whitelist tetap berbasis `TELEGRAM_ALLOWED_USER_IDS`
@@ -131,6 +135,7 @@ Catatan batas implementasi live yang harus dipahami dengan benar:
 - bug timeout deadlock/starvation pada worker pool sudah tertutup dan diverifikasi lewat `tests/worker_timeout_probe.ts`
 - `BacktestEngine` sudah bisa load replay dari `pair-history.jsonl`, menjalankan replay signal -> opportunity -> risk exit, dan persist hasil JSON
 - regression tambahan `tests/live_execution_hardening_probe.ts` sekarang menjaga live order sync / duplicate guard / cancel-all flow
+- probe yang sama sekarang juga menjaga startup recovery dan openOrders-first reconciliation
 
 ---
 
@@ -209,6 +214,8 @@ Sudah tertutup dan jangan dianggap backlog lagi:
 - sinkronisasi base URL Indodax ke contract env melalui `IndodaxClient`
 - live order metadata tracking di runtime order state
 - baseline sync exchange -> runtime order state via `getOrder(...)`
+- startup recovery live order via `recoverLiveOrdersOnStartup()`
+- openOrders-first reconciliation sebelum fallback `getOrder(...)`
 - baseline cancel-all exchange path untuk order aktif live
 - duplicate guard untuk live buy/sell order submission
 
@@ -222,7 +229,7 @@ Backlog nyata saat ini:
 - reconciliation yang lebih kaya antara trade response, `getOrder`, `openOrders`, `orderHistory`, dan runtime state lokal
 - agregasi partial fill buy menjadi satu posisi logis per pair/account
 - capture fee / executed trade detail / average fill yang lebih akurat dari exchange
-- recovery sinkronisasi order live setelah restart runtime
+- recovery sinkronisasi order live setelah restart runtime yang lebih lengkap untuk kasus restart di tengah partial fill / cancel / close
 
 ### P1 — penguatan intelligence/runtime
 - pindahkan pattern matching live path ke worker runtime bila memang dibutuhkan CPU offload konsisten

@@ -37,7 +37,7 @@ function mapTickerEntry(name: string, raw: Record<string, unknown>): IndodaxTick
 }
 
 export class PublicApi {
-  constructor(private readonly baseUrl = 'https://indodax.com/api') {}
+  constructor(private readonly baseUrl: string) {}
 
   async getTickers(): Promise<Record<string, IndodaxTickerEntry>> {
     const response = await fetch(`${this.baseUrl}/tickers`);

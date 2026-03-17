@@ -22,9 +22,13 @@ Gunakan informasi repo GitHub mafiamarkets-refactor-dua, REFACTOR_LOG.md, SESSIO
   - `OrderRecord` menyimpan metadata exchange (`exchangeOrderId`, `exchangeStatus`, `exchangeUpdatedAt`, `relatedPositionId`).
   - live buy dan live sell sekarang sama-sama submit ke private API exchange.
   - `ExecutionEngine.syncActiveOrders()` menyinkronkan status order live dan menerapkan delta fill ke runtime position.
+  - sync aktif sekarang memakai `openOrders()` dulu lalu fallback ke `getOrder()`.
+  - `ExecutionEngine.recoverLiveOrdersOnStartup()` ditambahkan untuk recovery startup order live aktif.
   - `cancelAllOrders()` sekarang mencoba cancel ke exchange untuk order live aktif.
   - duplicate active BUY/SELL guard ditambahkan.
   - `src/app.ts` position-monitor sekarang memanggil sync order live sebelum evaluasi exit.
+  - `src/app.ts` start path sekarang memanggil startup recovery untuk live orders.
+  - constructor public/private Indodax sekarang efektif diarahkan oleh env wiring tanpa bergantung ke fallback default URL.
 - Status validasi terbaru sudah diverifikasi:
   - `yarn lint` lulus
   - `yarn build` lulus
@@ -37,7 +41,7 @@ Gunakan informasi repo GitHub mafiamarkets-refactor-dua, REFACTOR_LOG.md, SESSIO
 - Reconciliation multi-sumber antara `trade`, `getOrder`, `openOrders`, `orderHistory`, dan runtime state.
 - Agregasi partial fill buy menjadi satu posisi logis per pair/account.
 - Capture fee, executed trade detail, dan average fill yang lebih akurat dari exchange.
-- Recovery sinkronisasi order aktif setelah restart runtime.
+- Recovery sinkronisasi order aktif setelah restart runtime untuk kasus partial fill / cancel / close yang lebih lengkap.
 
 ### P1
 - Pindahkan pattern matching pada live path ke worker runtime bila dibutuhkan untuk konsistensi offload CPU.

@@ -41,6 +41,8 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - flow simulasi buy/sell lengkap dan persist ke state
 - live buy / sell / cancel baseline sudah ada
 - order live menyimpan `exchangeOrderId` dan disinkronkan lewat `getOrder(...)`
+- startup sekarang memanggil `recoverLiveOrdersOnStartup()` untuk order live aktif yang tersisa
+- sync aktif memakai `openOrders()` dulu lalu fallback ke `getOrder()`
 - `position-monitor` sekarang memanggil `syncActiveOrders()` sebelum evaluasi exit
 - duplicate active BUY/SELL guard sudah aktif
 - yang belum final: agregasi partial fill buy, fee/trade-history capture, dan recovery sinkronisasi setelah restart
@@ -76,7 +78,7 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - reconciliation multi-sumber antara `trade`, `getOrder`, `openOrders`, `orderHistory`, dan runtime state
 - agregasi partial fill buy menjadi satu posisi logis
 - fee / executed-trade accounting dari exchange
-- recovery sinkronisasi order aktif setelah restart runtime
+- recovery restart untuk skenario partial fill / cancel / close yang lebih lengkap
 
 ### P1
 - pindahkan pattern matching live path ke worker runtime jika perlu offload konsisten
@@ -113,3 +115,4 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - `yarn build`
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-regression LOG_DIR=/tmp/mafiamarkets-audit-regression/logs TEMP_DIR=/tmp/mafiamarkets-audit-regression/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-timeout LOG_DIR=/tmp/mafiamarkets-audit-timeout/logs TEMP_DIR=/tmp/mafiamarkets-audit-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-recovery-probe-r5 LOG_DIR=/tmp/mafiamarkets-recovery-probe-r5/logs TEMP_DIR=/tmp/mafiamarkets-recovery-probe-r5/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
