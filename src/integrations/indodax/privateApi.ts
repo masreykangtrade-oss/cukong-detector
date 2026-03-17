@@ -38,7 +38,9 @@ export interface IndodaxOrderHistoryReturn {
 }
 
 export interface IndodaxTradeHistoryReturn {
-  trades?: Array<Record<string, string | number>>;
+  trades?:
+    | Array<Record<string, string | number>>
+    | Record<string, Array<Record<string, string | number>>>;
 }
 
 export interface IndodaxCancelOrderReturn {

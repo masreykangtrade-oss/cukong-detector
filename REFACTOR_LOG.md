@@ -18,6 +18,8 @@ Validasi yang sudah diverifikasi pada repo lokal:
 - probe live execution hardening lulus via:
   `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-live-hardening-probe-self LOG_DIR=/tmp/mafiamarkets-live-hardening-probe-self/logs TEMP_DIR=/tmp/mafiamarkets-live-hardening-probe-self/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
 - startup recovery + openOrders reconciliation juga sudah diverifikasi lagi via test report iteration 4
+- P0 live execution hardening generasi berikutnya juga lulus via:
+  `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-p0-live-probe-r4 LOG_DIR=/tmp/mafiamarkets-p0-live-probe-r4/logs TEMP_DIR=/tmp/mafiamarkets-p0-live-probe-r4/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
 
 Jalur runtime aktual yang berlaku sekarang:
 
@@ -32,10 +34,10 @@ Catatan penting tentang status aktual:
 - backtest replay sudah berjalan dari pair-history JSONL dan menyimpan hasil ke `data/backtest/*.json`
 
 Hal yang **belum selesai** dan jangan di-overclaim:
-- hardening live order semantics Indodax **sudah naik dari baseline lama**, termasuk startup recovery dan openOrders-first reconciliation, tetapi reconciliation lanjutan masih belum sepenuhnya end-to-end
-- repeated partial fill buy saat ini masih bisa tercatat sebagai slice posisi tambahan, belum diagregasi menjadi satu posisi logis per pair/account
-- fee, trade history exchange, dan recovery setelah restart belum dipakai penuh sebagai sumber rekonsiliasi akhir
-- `recentTrades` pada runtime masih **inferred flow** dari delta volume lokal, belum trade print native exchange
+- hardening live order semantics Indodax **sudah jauh lebih matang**, tetapi masih ada backlog lanjutan pada sumber data exchange dan edge-case recovery
+- accounting fee / executed trade / weighted fill sekarang sudah dipakai bila `tradeHistory` tersedia, namun fallback saat endpoint ini tidak tersedia masih terbatas ke snapshot order tanpa detail fee penuh
+- parser trade history sudah dikeraskan untuk beberapa shape payload resmi yang umum, tetapi belum ada verifikasi terhadap endpoint lain di luar `tradeHistory`
+- `recentTrades` pada runtime market intelligence masih **inferred flow** dari delta volume lokal, belum trade print native exchange
 - README root dan `.env.example` masih belum ada
 
 ---
@@ -112,6 +114,12 @@ Catatan audit penting:
 - `ExecutionEngine.syncActiveOrders()` sudah ada dan dipanggil oleh `position-monitor` loop di `src/app.ts` sebelum evaluasi exit.
 - `ExecutionEngine.recoverLiveOrdersOnStartup()` sekarang dipanggil saat start untuk menyinkronkan active live orders yang tersisa dari sesi sebelumnya.
 - `syncActiveOrders()` sekarang mencoba `openOrders()` dulu per account lalu fallback ke `getOrder()` untuk order yang belum terselesaikan.
+- repeated partial fill BUY sekarang digabung ke **satu posisi logis per pair/account** melalui merge fill di `PositionManager`, bukan membuat slice posisi baru setiap delta fill.
+- reconciliation sekarang mencoba menarik executed quantity, weighted average fill, fee, executed trade count, dan last executed timestamp dari exchange melalui `tradeHistory` jika tersedia.
+- parser fee sekarang menghindari double-count saat payload membawa `fee` sekaligus `fee_*`.
+- BUY default sekarang memakai **aggressive limit / limit rasa market**: referensi utama `bestAsk`, fallback `ticker.last/referencePrice`, lalu slippage bps terukur dengan pagar maksimum.
+- BUY yang masih OPEN/PARTIALLY_FILLED terlalu lama sekarang bisa dibatalkan sisa quantity-nya lewat timeout policy agar tidak menggantung pasif terlalu lama.
+- baseline SELL / take profit sekarang diarahkan ke gaya praktis untuk token pump cepat dengan **default take profit 15%**.
 
 Catatan batas implementasi live yang harus dipahami dengan benar:
 - live **buy** baseline sudah ada melalui `PrivateApi.trade(...)`
@@ -119,7 +127,10 @@ Catatan batas implementasi live yang harus dipahami dengan benar:
 - status live order sekarang disinkronkan ke runtime lewat `getOrder(...)` dan bisa bergerak `OPEN -> PARTIALLY_FILLED -> FILLED/CANCELED`
 - `cancelAllOrders()` sekarang mencoba `cancelOrder(...)` ke exchange untuk order aktif yang punya `exchangeOrderId`
 - duplicate guard sudah ada untuk mencegah BUY aktif ganda pada pair/account yang sama dan SELL aktif ganda pada posisi yang sama
-- partial fill delta sekarang bisa diaplikasikan ke runtime position melalui `syncActiveOrders()`, tetapi agregasi posisi buy berulang masih belum final
+- partial fill delta sekarang bukan hanya diaplikasikan ke runtime position, tetapi juga digabung ke satu posisi logis per pair/account
+- stop / take profit dibangun dari baseline risk settings saat fill diterapkan; take profit default 15% bisa diubah dari Telegram
+- trailing stop masih ada sebagai baseline lama di risk engine, tetapi **jangan dianggap fitur exit final utama** untuk iterasi ini; baseline exit utama yang dikunci sekarang adalah TP eksplisit + stop loss + cancel/disciplined live reconciliation
+- belum ada bukti resmi yang terverifikasi untuk endpoint Indodax `myTrades` v2, jadi reconciliation saat ini tetap memakai jalur resmi terdokumentasi `tradeHistory` yang sudah dikeraskan parser-nya
 - base URL public/private Indodax sekarang efektif dipaksa lewat env wiring, bukan diandalkan dari fallback default constructor
 
 ### 3.6 Telegram flow
@@ -128,6 +139,8 @@ Catatan batas implementasi live yang harus dipahami dengan benar:
 - upload legacy JSON account tetap didukung dengan format lama
 - menu operasional aktif: `Status`, `Market Watch`, `Hotlist`, `Intelligence Report`, `Spoof Radar`, `Pattern Match`, `Backtest`, `Positions`, `Orders`, `Manual Buy`, `Manual Sell`, `Strategy`, `Risk`, `Accounts`, `Logs`, `Emergency`
 - `START` / `STOP` pada Telegram mengubah state runtime (`RUNNING` / `STOPPED`) untuk mengontrol loop aktif; ini bukan proses bootstrap ulang aplikasi
+- user sekarang bisa mengubah **buy slippage bps** dari Telegram melalui menu `Strategy`
+- user sekarang bisa mengubah **take profit %** dari Telegram melalui menu `Risk`
 
 ### 3.7 Worker + backtest flow
 - `WorkerPoolService` aktif dengan worker `feature`, `pattern`, dan `backtest`
@@ -218,6 +231,10 @@ Sudah tertutup dan jangan dianggap backlog lagi:
 - openOrders-first reconciliation sebelum fallback `getOrder(...)`
 - baseline cancel-all exchange path untuk order aktif live
 - duplicate guard untuk live buy/sell order submission
+- merge repeated partial BUY fills ke satu posisi logis per pair/account
+- aggressive limit BUY policy dengan slippage bps terukur dan timeout cancel untuk order buy yang menggantung
+- default take profit 15% dengan jalur konfigurasi dari Telegram
+- capture baseline fee / executed trade count / weighted average fill via `tradeHistory` bila tersedia
 
 ---
 
@@ -226,10 +243,8 @@ Sudah tertutup dan jangan dianggap backlog lagi:
 Backlog nyata saat ini:
 
 ### P0 — hardening live execution
-- reconciliation yang lebih kaya antara trade response, `getOrder`, `openOrders`, `orderHistory`, dan runtime state lokal
-- agregasi partial fill buy menjadi satu posisi logis per pair/account
-- capture fee / executed trade detail / average fill yang lebih akurat dari exchange
-- recovery sinkronisasi order live setelah restart runtime yang lebih lengkap untuk kasus restart di tengah partial fill / cancel / close
+- recovery sinkronisasi order live setelah restart runtime yang lebih lengkap untuk kasus restart di tengah partial fill / cancel / close ketika detail fee/trade exchange tidak lengkap
+- perluasan sumber accounting bila di masa depan ada endpoint exchange lain yang resmi/terverifikasi selain `tradeHistory`
 
 ### P1 — penguatan intelligence/runtime
 - pindahkan pattern matching live path ke worker runtime bila memang dibutuhkan CPU offload konsisten
@@ -248,10 +263,9 @@ Backlog nyata saat ini:
 Prioritas berikutnya yang paling rasional:
 
 1. hardening live Indodax execution end-to-end
-   - reconciliation multi-sumber (`trade`, `getOrder`, `openOrders`, `orderHistory`)
-   - agregasi partial fill
-   - fee / executed-trade accounting
-   - restart recovery
+   - pendalaman edge-case partial fill / cancel / close setelah restart
+   - fallback accounting saat detail fee exchange tidak tersedia
+   - verifikasi lebih jauh sumber trade exchange resmi bila ada perubahan dokumen resmi di kemudian hari
 2. finalisasi README dan `.env.example`
 3. bila diperlukan, integrasikan pattern worker ke jalur live intelligence agar offload analytics lebih konsisten
 
@@ -259,4 +273,4 @@ Prioritas berikutnya yang paling rasional:
 
 ## 8. Ringkasan final satu paragraf
 
-Repo aktif `https://github.com/bcbcrey-hue/mafiamarkets-refactor-dua` sudah berada pada status refactor backend yang nyata dan saling terhubung dari env/core/persistence, market watcher, signal engine, intelligence/history, worker runtime, backtest, sampai Telegram operational hooks. Status lama yang menyebut progres masih draft atau belum diterapkan **tidak berlaku lagi**. Sumber kebenaran terbaru sekarang adalah: runtime utama sudah memakai `OpportunityAssessment` sebelum execution, live order baseline buy/sell/cancel/sync sudah ada, duplicate guard sudah aktif, dan polling runtime sudah menyinkronkan order live; tetapi trade-flow market masih inferred dan reconciliation exchange masih perlu pendalaman untuk partial fill aggregation, fee capture, serta recovery pasca-restart.
+Repo aktif `https://github.com/bcbcrey-hue/mafiamarkets-refactor-dua` sudah berada pada status refactor backend yang nyata dan saling terhubung dari env/core/persistence, market watcher, signal engine, intelligence/history, worker runtime, backtest, sampai Telegram operational hooks. Status lama yang menyebut progres masih draft atau belum diterapkan **tidak berlaku lagi**. Sumber kebenaran terbaru sekarang adalah: runtime utama sudah memakai `OpportunityAssessment` sebelum execution, BUY baseline sudah menjadi aggressive limit dengan slippage terukur, repeated partial BUY fill sudah digabung ke satu posisi logis per pair/account, startup recovery + openOrders-first reconciliation sudah aktif, SELL / TP baseline sudah disiplin dengan default TP 15% yang bisa diubah dari Telegram, dan accounting fee/weighted fill sudah ditarik dari exchange saat `tradeHistory` tersedia; yang masih tersisa adalah edge-case lanjutan pada ketersediaan detail exchange dan pendalaman recovery tertentu.

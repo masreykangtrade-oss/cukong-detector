@@ -226,7 +226,13 @@ export class ExecutionEngine {
     }
 
     const asset = this.baseAsset(order.pair);
-    const matchingTrades = (payload.trades ?? []).filter((trade) => {
+    const tradesSource = Array.isArray(payload.trades)
+      ? payload.trades
+      : Array.isArray(payload.trades?.[order.pair])
+        ? payload.trades[order.pair]
+        : Object.values(payload.trades ?? {}).flat();
+
+    const matchingTrades = tradesSource.filter((trade) => {
       const orderId = trade.order_id;
       return orderId !== undefined && orderId !== null && String(orderId) === exchangeOrderId;
     });
@@ -255,10 +261,7 @@ export class ExecutionEngine {
       }
 
       const directFee = this.toFiniteNumber(trade.fee);
-      if (directFee !== null) {
-        feeAmount += directFee;
-        feeAsset ??= this.quoteAsset(order.pair);
-      }
+      let feeCapturedFromSpecificField = false;
 
       for (const [key, value] of Object.entries(trade)) {
         if (!key.startsWith('fee_')) {
@@ -272,6 +275,12 @@ export class ExecutionEngine {
 
         feeAmount += feeValue;
         feeAsset ??= key.slice(4) || null;
+        feeCapturedFromSpecificField = true;
+      }
+
+      if (directFee !== null && !feeCapturedFromSpecificField) {
+        feeAmount += directFee;
+        feeAsset ??= this.quoteAsset(order.pair);
       }
 
       const tradeTimestamp = this.parseTradeTimestamp(trade);

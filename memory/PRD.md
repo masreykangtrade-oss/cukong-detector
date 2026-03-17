@@ -24,6 +24,12 @@ Gunakan informasi repo GitHub mafiamarkets-refactor-dua, REFACTOR_LOG.md, SESSIO
   - `ExecutionEngine.syncActiveOrders()` menyinkronkan status order live dan menerapkan delta fill ke runtime position.
   - sync aktif sekarang memakai `openOrders()` dulu lalu fallback ke `getOrder()`.
   - `ExecutionEngine.recoverLiveOrdersOnStartup()` ditambahkan untuk recovery startup order live aktif.
+  - repeated partial BUY fill sekarang di-merge ke satu posisi logis per pair/account di `PositionManager`.
+  - BUY default sekarang aggressive limit memakai referensi `bestAsk` + slippage bps terukur dengan pagar maksimum.
+  - buy remainder yang terlalu lama OPEN/PARTIALLY_FILLED sekarang bisa dibatalkan via timeout policy.
+  - fee / executed trade count / weighted average fill sekarang diambil dari exchange melalui `tradeHistory` saat tersedia, dengan parser yang mendukung shape payload array maupun keyed-by-pair.
+  - parser fee dikeraskan agar tidak double-count saat payload membawa `fee` dan `fee_*` sekaligus.
+  - default take profit sekarang 15% dan bisa diubah dari Telegram.
   - `cancelAllOrders()` sekarang mencoba cancel ke exchange untuk order live aktif.
   - duplicate active BUY/SELL guard ditambahkan.
   - `src/app.ts` position-monitor sekarang memanggil sync order live sebelum evaluasi exit.
@@ -38,10 +44,9 @@ Gunakan informasi repo GitHub mafiamarkets-refactor-dua, REFACTOR_LOG.md, SESSIO
 
 ## Prioritized Backlog
 ### P0
-- Reconciliation multi-sumber antara `trade`, `getOrder`, `openOrders`, `orderHistory`, dan runtime state.
-- Agregasi partial fill buy menjadi satu posisi logis per pair/account.
-- Capture fee, executed trade detail, dan average fill yang lebih akurat dari exchange.
-- Recovery sinkronisasi order aktif setelah restart runtime untuk kasus partial fill / cancel / close yang lebih lengkap.
+- Fallback accounting saat detail trade exchange tidak tersedia.
+- Recovery sinkronisasi order aktif setelah restart runtime untuk edge-case partial fill / cancel / close yang lebih lengkap.
+- Verifikasi sumber trade exchange resmi tambahan bila dokumentasi resmi berubah.
 
 ### P1
 - Pindahkan pattern matching pada live path ke worker runtime bila dibutuhkan untuk konsistensi offload CPU.

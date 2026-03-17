@@ -45,7 +45,11 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - sync aktif memakai `openOrders()` dulu lalu fallback ke `getOrder()`
 - `position-monitor` sekarang memanggil `syncActiveOrders()` sebelum evaluasi exit
 - duplicate active BUY/SELL guard sudah aktif
-- yang belum final: agregasi partial fill buy, fee/trade-history capture, dan recovery sinkronisasi setelah restart
+- repeated partial fill BUY sekarang sudah merge ke satu posisi logis per pair/account
+- BUY default sekarang aggressive limit dari `bestAsk` + slippage bps aman; order buy yang stale bisa dibatalkan oleh timeout policy
+- fee / executed trade count / weighted average fill sekarang ditarik dari exchange saat `tradeHistory` tersedia
+- default take profit sekarang 15% dan bisa diubah dari Telegram
+- yang belum final: fallback accounting saat detail trade exchange tidak tersedia, plus edge-case recovery tertentu setelah restart
 
 ### Telegram
 - Telegram button UI tetap UI utama
@@ -69,16 +73,16 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - timeout deadlock / starvation pada worker pool
 - sinkronisasi base URL Indodax ke env di entry client
 - baseline live order sync / cancel / duplicate-guard
+- merge partial BUY fill + aggressive BUY policy + Telegram TP/slippage config
 
 ---
 
 ## 4. Backlog aktif yang nyata
 
 ### P0
-- reconciliation multi-sumber antara `trade`, `getOrder`, `openOrders`, `orderHistory`, dan runtime state
-- agregasi partial fill buy menjadi satu posisi logis
-- fee / executed-trade accounting dari exchange
+- fallback accounting saat detail trade exchange tidak tersedia
 - recovery restart untuk skenario partial fill / cancel / close yang lebih lengkap
+- verifikasi sumber trade exchange resmi tambahan bila dokumentasi resmi berubah di masa depan
 
 ### P1
 - pindahkan pattern matching live path ke worker runtime jika perlu offload konsisten
@@ -116,3 +120,4 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-regression LOG_DIR=/tmp/mafiamarkets-audit-regression/logs TEMP_DIR=/tmp/mafiamarkets-audit-regression/tmp yarn tsx /app/tests/runtime_backend_regression.ts`
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-timeout LOG_DIR=/tmp/mafiamarkets-audit-timeout/logs TEMP_DIR=/tmp/mafiamarkets-audit-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts`
 - `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-recovery-probe-r5 LOG_DIR=/tmp/mafiamarkets-recovery-probe-r5/logs TEMP_DIR=/tmp/mafiamarkets-recovery-probe-r5/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
+- `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-p0-live-probe-r4 LOG_DIR=/tmp/mafiamarkets-p0-live-probe-r4/logs TEMP_DIR=/tmp/mafiamarkets-p0-live-probe-r4/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
