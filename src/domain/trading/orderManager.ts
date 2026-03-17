@@ -14,6 +14,10 @@ export interface CreateOrderInput {
   status?: OrderRecord['status'];
   averageFillPrice?: number | null;
   filledQuantity?: number;
+  exchangeOrderId?: string;
+  exchangeStatus?: string;
+  exchangeUpdatedAt?: string;
+  relatedPositionId?: string;
   notes?: string;
 }
 
@@ -63,6 +67,10 @@ export class OrderManager {
       createdAt: now,
       updatedAt: now,
       source: input.source,
+      exchangeOrderId: input.exchangeOrderId,
+      exchangeStatus: input.exchangeStatus,
+      exchangeUpdatedAt: input.exchangeUpdatedAt,
+      relatedPositionId: input.relatedPositionId,
       notes: input.notes,
     };
 

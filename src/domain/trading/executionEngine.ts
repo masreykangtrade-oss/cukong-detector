@@ -3,6 +3,7 @@ import type {
   BotSettings,
   ManualOrderRequest,
   OpportunityAssessment,
+  OrderRecord,
   PositionRecord,
   SignalCandidate,
   TradingMode,
@@ -10,6 +11,10 @@ import type {
 import { logger } from '../../core/logger';
 import { nowIso } from '../../utils/time';
 import { IndodaxClient } from '../../integrations/indodax/client';
+import type {
+  IndodaxGetOrderReturn,
+  IndodaxTradeReturn,
+} from '../../integrations/indodax/privateApi';
 import { JournalService } from '../../services/journalService';
 import { StateService } from '../../services/stateService';
 import { SettingsService } from '../settings/settingsService';
@@ -19,6 +24,13 @@ import { PositionManager } from './positionManager';
 import { RiskEngine } from './riskEngine';
 
 type ExecutionCandidate = SignalCandidate | OpportunityAssessment;
+
+interface ExchangeOrderSnapshot {
+  exchangeStatus: string;
+  filledQuantity: number;
+  remainingQuantity: number | null;
+  averageFillPrice: number | null;
+}
 
 export class ExecutionEngine {
   constructor(
@@ -31,6 +43,195 @@ export class ExecutionEngine {
     private readonly orders: OrderManager,
     private readonly journal: JournalService,
   ) {}
+
+  private toFiniteNumber(value: unknown): number | null {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private baseAsset(pair: string): string {
+    const [baseAsset] = pair.toLowerCase().split('_');
+    return baseAsset || 'amount';
+  }
+
+  private appendNotes(current: string | undefined, note: string): string {
+    return current ? `${current}; ${note}` : note;
+  }
+
+  private hasActiveOrder(
+    pair: string,
+    side: OrderRecord['side'],
+    accountId: string,
+    relatedPositionId?: string,
+  ): boolean {
+    return this.orders.listActive().some((order) => {
+      if (order.pair !== pair || order.side !== side || order.accountId !== accountId) {
+        return false;
+      }
+
+      if (relatedPositionId && order.relatedPositionId) {
+        return order.relatedPositionId === relatedPositionId;
+      }
+
+      return true;
+    });
+  }
+
+  private mapExchangeStatus(
+    snapshot: ExchangeOrderSnapshot,
+    totalQuantity: number,
+  ): OrderRecord['status'] {
+    const normalized = snapshot.exchangeStatus.trim().toLowerCase();
+
+    if (['cancel', 'canceled', 'cancelled', 'expired'].includes(normalized)) {
+      return 'CANCELED';
+    }
+
+    if (['rejected', 'reject', 'failed'].includes(normalized)) {
+      return 'REJECTED';
+    }
+
+    if (['filled', 'closed', 'done'].includes(normalized)) {
+      return 'FILLED';
+    }
+
+    if (snapshot.filledQuantity >= totalQuantity - 1e-8) {
+      return 'FILLED';
+    }
+
+    if (snapshot.filledQuantity > 1e-8) {
+      return 'PARTIALLY_FILLED';
+    }
+
+    return 'OPEN';
+  }
+
+  private buildExchangeSnapshot(
+    order: OrderRecord,
+    payload: IndodaxGetOrderReturn,
+  ): ExchangeOrderSnapshot {
+    const exchangeOrder = payload.order ?? {};
+    const asset = this.baseAsset(order.pair);
+    const orderedQuantity =
+      this.toFiniteNumber(exchangeOrder[`order_${asset}`]) ?? order.quantity;
+    const remainingQuantity =
+      this.toFiniteNumber(exchangeOrder[`remain_${asset}`]) ??
+      this.toFiniteNumber(exchangeOrder.remain) ??
+      null;
+    const filledQuantity = remainingQuantity !== null
+      ? Math.max(0, Math.min(order.quantity, orderedQuantity - remainingQuantity))
+      : order.filledQuantity;
+
+    return {
+      exchangeStatus:
+        typeof exchangeOrder.status === 'string' && exchangeOrder.status.trim()
+          ? exchangeOrder.status
+          : 'open',
+      filledQuantity,
+      remainingQuantity,
+      averageFillPrice: this.toFiniteNumber(exchangeOrder.price) ?? order.averageFillPrice ?? order.price,
+    };
+  }
+
+  private async applyFillDelta(
+    order: OrderRecord,
+    nextFilledQuantity: number,
+    executionPrice: number,
+  ): Promise<void> {
+    const deltaFilled = Math.max(0, nextFilledQuantity - order.filledQuantity);
+    if (deltaFilled <= 1e-8) {
+      return;
+    }
+
+    if (order.side === 'buy') {
+      const stops = this.risk.buildStops(executionPrice, this.settings.get());
+      await this.positions.open({
+        accountId: order.accountId,
+        pair: order.pair,
+        quantity: deltaFilled,
+        entryPrice: executionPrice,
+        stopLossPrice: stops.stopLossPrice,
+        takeProfitPrice: stops.takeProfitPrice,
+        sourceOrderId: order.id,
+      });
+    } else {
+      const targetPosition =
+        (order.relatedPositionId ? this.positions.getById(order.relatedPositionId) : undefined) ??
+        this.positions
+          .getOpenByPair(order.pair)
+          .find((item) => item.accountId === order.accountId);
+
+      if (!targetPosition) {
+        await this.journal.warn('SELL_SYNC_POSITION_MISSING', 'position tidak ditemukan saat sync sell live', {
+          orderId: order.id,
+          pair: order.pair,
+          deltaFilled,
+        });
+      } else {
+        await this.positions.closePartial(targetPosition.id, deltaFilled, executionPrice);
+      }
+    }
+
+    await this.journal.append({
+      id: `${order.id}-${nowIso()}`,
+      type: 'TRADE',
+      title: 'Live fill synced',
+      message: `${order.side.toUpperCase()} ${order.pair} qty=${deltaFilled.toFixed(8)}`,
+      pair: order.pair,
+      payload: {
+        accountId: order.accountId,
+        orderId: order.id,
+        exchangeOrderId: order.exchangeOrderId,
+        executionPrice,
+        quantity: deltaFilled,
+      },
+      createdAt: nowIso(),
+    });
+
+    await this.state.markTrade();
+    await this.state.setPairCooldown(order.pair, Date.now() + this.settings.get().risk.cooldownMs);
+  }
+
+  private async syncLiveOrder(orderId: string): Promise<OrderRecord | undefined> {
+    const order = this.orders.getById(orderId);
+    if (!order?.exchangeOrderId) {
+      return order;
+    }
+
+    const account = this.accounts.getById(order.accountId);
+    if (!account) {
+      return order;
+    }
+
+    const api = this.indodax.forAccount(account);
+    const response = await api.getOrder(order.pair, order.exchangeOrderId);
+    const snapshot = this.buildExchangeSnapshot(order, response.return ?? {});
+    const averageFillPrice = snapshot.averageFillPrice ?? order.price;
+
+    await this.applyFillDelta(order, snapshot.filledQuantity, averageFillPrice);
+
+    return this.orders.update(order.id, {
+      status: this.mapExchangeStatus(snapshot, order.quantity),
+      filledQuantity: snapshot.filledQuantity,
+      averageFillPrice,
+      exchangeStatus: snapshot.exchangeStatus,
+      exchangeUpdatedAt: nowIso(),
+      notes: this.appendNotes(
+        order.notes,
+        `exchangeStatus=${snapshot.exchangeStatus}`,
+      ),
+    });
+  }
+
+  private extractExchangeOrderId(response: IndodaxTradeReturn | undefined): string | undefined {
+    const orderId = response?.order_id;
+    return orderId !== undefined && orderId !== null ? String(orderId) : undefined;
+  }
+
+  private formatLiveOrderMessage(prefix: 'BUY' | 'SELL', order: OrderRecord): string {
+    const suffix = order.exchangeOrderId ? ` orderId=${order.exchangeOrderId}` : '';
+    return `${prefix} live ${order.pair} status=${order.status} filled=${order.filledQuantity.toFixed(8)}/${order.quantity.toFixed(8)}${suffix}`;
+  }
 
   private shouldSimulate(mode: TradingMode, settings: BotSettings): boolean {
     return (
@@ -175,6 +376,10 @@ export class ExecutionEngine {
       throw new Error('Account tidak ditemukan');
     }
 
+    if (this.hasActiveOrder(signal.pair, 'buy', accountId)) {
+      throw new Error('Masih ada order BUY aktif pada pair/account yang sama');
+    }
+
     const riskResult = this.risk.checkCanEnter({
       account,
       settings,
@@ -240,27 +445,38 @@ export class ExecutionEngine {
       return `BUY simulated ${signal.pair} qty=${quantity.toFixed(8)}`;
     }
 
-    const api = this.indodax.forAccount(account);
-    const liveResult = await api.trade(signal.pair, 'buy', entryPrice, amountIdr);
+    try {
+      const api = this.indodax.forAccount(account);
+      const liveResult = await api.trade(signal.pair, 'buy', entryPrice, amountIdr);
+      const exchangeOrderId = this.extractExchangeOrderId(liveResult.return);
 
-    logger.info({ pair: signal.pair, accountId, liveResult }, 'live buy order sent');
+      logger.info(
+        { pair: signal.pair, accountId, exchangeOrderId, liveResult },
+        'live buy order sent',
+      );
 
-    await this.orders.markFilled(order.id, quantity, entryPrice);
+      await this.orders.update(order.id, {
+        exchangeOrderId,
+        exchangeStatus: exchangeOrderId ? 'submitted' : 'submitted_without_order_id',
+        exchangeUpdatedAt: nowIso(),
+        notes: this.appendNotes(
+          order.notes,
+          exchangeOrderId ? `exchangeOrderId=${exchangeOrderId}` : 'exchangeOrderId=missing',
+        ),
+      });
 
-    await this.positions.open({
-      accountId,
-      pair: signal.pair,
-      quantity,
-      entryPrice,
-      stopLossPrice: stops.stopLossPrice,
-      takeProfitPrice: stops.takeProfitPrice,
-      sourceOrderId: order.id,
-    });
+      const synced = exchangeOrderId
+        ? await this.syncLiveOrder(order.id)
+        : await this.orders.markOpen(order.id);
 
-    await this.state.markTrade();
-    await this.state.setPairCooldown(signal.pair, Date.now() + settings.risk.cooldownMs);
-
-    return `BUY live ${signal.pair} qty=${quantity.toFixed(8)}`;
+      return this.formatLiveOrderMessage('BUY', synced ?? order);
+    } catch (error) {
+      await this.orders.reject(
+        order.id,
+        error instanceof Error ? error.message : 'live buy failed',
+      );
+      throw error;
+    }
   }
 
   async manualOrder(request: ManualOrderRequest): Promise<string> {
@@ -314,6 +530,16 @@ export class ExecutionEngine {
     const exitPrice = position.currentPrice || position.averageEntryPrice;
     const closeQuantity = Math.max(0, Math.min(position.quantity, quantityToSell));
 
+    if (closeQuantity <= 0) {
+      throw new Error('Quantity sell tidak valid');
+    }
+
+    if (this.hasActiveOrder(position.pair, 'sell', position.accountId, position.id)) {
+      throw new Error('Masih ada order SELL aktif untuk posisi ini');
+    }
+
+    const settings = this.settings.get();
+
     const order = await this.orders.create({
       accountId: position.accountId,
       pair: position.pair,
@@ -323,32 +549,113 @@ export class ExecutionEngine {
       quantity: closeQuantity,
       source,
       status: 'OPEN',
+      relatedPositionId: position.id,
       notes: 'manual/exit sell',
     });
 
-    await this.orders.markFilled(order.id, closeQuantity, exitPrice);
-    const updated = await this.positions.closePartial(position.id, closeQuantity, exitPrice);
+    if (this.shouldSimulate(settings.tradingMode, settings)) {
+      await this.orders.markFilled(order.id, closeQuantity, exitPrice);
+      const updated = await this.positions.closePartial(position.id, closeQuantity, exitPrice);
 
-    await this.journal.append({
-      id: order.id,
-      type: 'TRADE',
-      title: 'Sell filled',
-      message: `SELL ${position.pair} qty=${closeQuantity.toFixed(8)}`,
-      pair: position.pair,
-      payload: {
-        accountId: position.accountId,
-        exitPrice,
-        quantity: closeQuantity,
-        realizedPnl: updated?.realizedPnl ?? 0,
-        source,
-      },
-      createdAt: nowIso(),
-    });
+      await this.journal.append({
+        id: order.id,
+        type: 'TRADE',
+        title: 'Sell filled',
+        message: `SELL ${position.pair} qty=${closeQuantity.toFixed(8)}`,
+        pair: position.pair,
+        payload: {
+          accountId: position.accountId,
+          exitPrice,
+          quantity: closeQuantity,
+          realizedPnl: updated?.realizedPnl ?? 0,
+          source,
+        },
+        createdAt: nowIso(),
+      });
 
-    await this.state.markTrade();
-    await this.state.setPairCooldown(position.pair, Date.now() + this.settings.get().risk.cooldownMs);
+      await this.state.markTrade();
+      await this.state.setPairCooldown(position.pair, Date.now() + settings.risk.cooldownMs);
 
-    return `SELL ${position.pair} qty=${closeQuantity.toFixed(8)} selesai`;
+      return `SELL simulated ${position.pair} qty=${closeQuantity.toFixed(8)} selesai`;
+    }
+
+    try {
+      const account = this.accounts.getById(position.accountId);
+      if (!account) {
+        throw new Error('Account posisi tidak ditemukan');
+      }
+
+      const api = this.indodax.forAccount(account);
+      const liveResult = await api.trade(position.pair, 'sell', exitPrice, closeQuantity);
+      const exchangeOrderId = this.extractExchangeOrderId(liveResult.return);
+
+      logger.info(
+        { pair: position.pair, accountId: position.accountId, exchangeOrderId, liveResult },
+        'live sell order sent',
+      );
+
+      await this.orders.update(order.id, {
+        exchangeOrderId,
+        exchangeStatus: exchangeOrderId ? 'submitted' : 'submitted_without_order_id',
+        exchangeUpdatedAt: nowIso(),
+        notes: this.appendNotes(
+          order.notes,
+          exchangeOrderId ? `exchangeOrderId=${exchangeOrderId}` : 'exchangeOrderId=missing',
+        ),
+      });
+
+      const synced = exchangeOrderId
+        ? await this.syncLiveOrder(order.id)
+        : await this.orders.markOpen(order.id);
+
+      return this.formatLiveOrderMessage('SELL', synced ?? order);
+    } catch (error) {
+      await this.orders.reject(
+        order.id,
+        error instanceof Error ? error.message : 'live sell failed',
+      );
+      throw error;
+    }
+  }
+
+  async syncActiveOrders(): Promise<string[]> {
+    const settings = this.settings.get();
+    if (this.shouldSimulate(settings.tradingMode, settings)) {
+      return [];
+    }
+
+    const messages: string[] = [];
+
+    for (const activeOrder of this.orders.listActive()) {
+      if (!activeOrder.exchangeOrderId) {
+        continue;
+      }
+
+      try {
+        const beforeStatus = activeOrder.status;
+        const beforeFilled = activeOrder.filledQuantity;
+        const synced = await this.syncLiveOrder(activeOrder.id);
+
+        if (
+          synced &&
+          (synced.status !== beforeStatus || synced.filledQuantity !== beforeFilled)
+        ) {
+          messages.push(this.formatLiveOrderMessage(synced.side.toUpperCase() as 'BUY' | 'SELL', synced));
+        }
+      } catch (error) {
+        await this.journal.error(
+          'ORDER_SYNC_FAILED',
+          error instanceof Error ? error.message : 'unknown order sync failure',
+          {
+            orderId: activeOrder.id,
+            exchangeOrderId: activeOrder.exchangeOrderId,
+            pair: activeOrder.pair,
+          },
+        );
+      }
+    }
+
+    return messages;
   }
 
   async evaluateOpenPositions(): Promise<string[]> {
@@ -369,7 +676,34 @@ export class ExecutionEngine {
   }
 
   async cancelAllOrders(): Promise<string> {
-    const count = await this.orders.cancelAll('emergency cancel all');
+    const settings = this.settings.get();
+
+    if (this.shouldSimulate(settings.tradingMode, settings)) {
+      const count = await this.orders.cancelAll('emergency cancel all');
+      return `Canceled ${count} active orders`;
+    }
+
+    let count = 0;
+
+    for (const order of this.orders.listActive()) {
+      const account = this.accounts.getById(order.accountId);
+
+      if (order.exchangeOrderId && account) {
+        const api = this.indodax.forAccount(account);
+        await api.cancelOrder(order.pair, order.exchangeOrderId, order.side);
+        await this.orders.update(order.id, {
+          status: 'CANCELED',
+          exchangeStatus: 'canceled',
+          exchangeUpdatedAt: nowIso(),
+          notes: this.appendNotes(order.notes, 'exchange cancel requested'),
+        });
+      } else {
+        await this.orders.cancel(order.id, 'local cancel without exchange order id');
+      }
+
+      count += 1;
+    }
+
     return `Canceled ${count} active orders`;
   }
 

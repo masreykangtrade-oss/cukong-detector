@@ -188,6 +188,7 @@ export async function createApp(): Promise<AppRuntime> {
       return;
     }
 
+    await executionEngine.syncActiveOrders();
     await executionEngine.evaluateOpenPositions();
   });
 

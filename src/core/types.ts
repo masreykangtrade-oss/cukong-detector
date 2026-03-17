@@ -270,6 +270,10 @@ export interface OrderRecord {
   createdAt: string;
   updatedAt: string;
   source: 'MANUAL' | 'SEMI_AUTO' | 'AUTO';
+  exchangeOrderId?: string;
+  exchangeStatus?: string;
+  exchangeUpdatedAt?: string;
+  relatedPositionId?: string;
   notes?: string;
 }
 

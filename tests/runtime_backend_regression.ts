@@ -31,6 +31,58 @@ class FakeIndodaxClient {
   }
 }
 
+class FakeLiveOrderApi {
+  private readonly tradeQueue: Array<Record<string, unknown>> = [];
+  private readonly orderQueue = new Map<string, Array<Record<string, unknown>>>();
+
+  queueTrade(response: Record<string, unknown>) {
+    this.tradeQueue.push(response);
+  }
+
+  queueOrder(orderId: string, ...responses: Array<Record<string, unknown>>) {
+    this.orderQueue.set(orderId, responses);
+  }
+
+  async trade() {
+    const next = this.tradeQueue.shift();
+    if (!next) {
+      throw new Error('No queued live trade response');
+    }
+    return next;
+  }
+
+  async getOrder(_pair: string, orderId: string) {
+    const queue = this.orderQueue.get(orderId);
+    if (!queue || queue.length === 0) {
+      throw new Error(`No queued getOrder response for ${orderId}`);
+    }
+
+    if (queue.length === 1) {
+      return queue[0];
+    }
+
+    return queue.shift() as Record<string, unknown>;
+  }
+
+  async cancelOrder(_pair: string, orderId: string) {
+    return {
+      success: 1,
+      return: {
+        order_id: orderId,
+        status: 'canceled',
+      },
+    };
+  }
+}
+
+class FakeLiveIndodaxClient {
+  constructor(private readonly api: FakeLiveOrderApi) {}
+
+  forAccount() {
+    return this.api;
+  }
+}
+
 function makeSnapshot(pair: string, price: number, bid = price * 0.999, ask = price * 1.001): MarketSnapshot {
   const now = Date.now();
   return {
@@ -289,6 +341,174 @@ async function main() {
   assert.equal(state.get().tradeCount, beforeTradeCount + 1, 'tradeCount should increase by 1');
   const afterCooldown = state.get().pairCooldowns[validOpportunity.pair] ?? 0;
   assert.ok(afterCooldown > beforeCooldown, 'pair cooldown should be updated');
+
+  // Module: live order submission + sync + cancel hardening.
+  const liveApi = new FakeLiveOrderApi();
+  const liveExecution = new ExecutionEngine(
+    accountRegistry,
+    settings,
+    state,
+    risk,
+    new FakeLiveIndodaxClient(liveApi) as never,
+    positionManager,
+    orderManager,
+    journal,
+  );
+
+  await settings.replace({
+    ...strictSettings,
+    tradingMode: 'FULL_AUTO',
+    dryRun: false,
+    paperTrade: false,
+    uiOnly: false,
+  });
+
+  const liveBaseSignal = signalEngine.score(
+    makeSnapshot('sol_idr', 20_000_000, 19_990_000, 20_010_000),
+  );
+  const liveOpportunity = makeOpportunity(liveBaseSignal);
+  const liveBuyPrice = liveOpportunity.bestAsk;
+  const liveBuyQty = 200_000 / liveBuyPrice;
+
+  liveApi.queueTrade({
+    success: 1,
+    return: {
+      order_id: 'LIVE-BUY-1',
+    },
+  });
+  liveApi.queueOrder('LIVE-BUY-1', {
+    success: 1,
+    return: {
+      order: {
+        order_id: 'LIVE-BUY-1',
+        price: String(liveBuyPrice),
+        status: 'filled',
+        order_sol: String(liveBuyQty),
+        remain_sol: '0',
+      },
+    },
+  });
+
+  const liveBuyMessage = await liveExecution.buy(
+    defaultAccount.id,
+    liveOpportunity,
+    200_000,
+    'AUTO',
+  );
+  assert.ok(
+    liveBuyMessage.includes('status=FILLED'),
+    'Live buy should sync filled status from exchange snapshot',
+  );
+
+  const liveBuyOrder = orderManager.list().find((item) => item.exchangeOrderId === 'LIVE-BUY-1');
+  assert.ok(liveBuyOrder, 'Live buy order should store exchange order id');
+  assert.equal(liveBuyOrder?.status, 'FILLED', 'Live buy order should be marked FILLED after sync');
+
+  const livePosition = positionManager
+    .listOpen()
+    .find((item) => item.pair === liveOpportunity.pair && item.accountId === defaultAccount.id);
+  assert.ok(livePosition, 'Live buy fill should open a position');
+
+  const liveSellPrice = livePosition?.currentPrice ?? livePosition?.entryPrice ?? liveBuyPrice;
+  const liveSellQty = livePosition?.quantity ?? 0;
+
+  liveApi.queueTrade({
+    success: 1,
+    return: {
+      order_id: 'LIVE-SELL-1',
+    },
+  });
+  liveApi.queueOrder(
+    'LIVE-SELL-1',
+    {
+      success: 1,
+      return: {
+        order: {
+          order_id: 'LIVE-SELL-1',
+          price: String(liveSellPrice),
+          status: 'open',
+          order_sol: String(liveSellQty),
+          remain_sol: String(liveSellQty),
+        },
+      },
+    },
+    {
+      success: 1,
+      return: {
+        order: {
+          order_id: 'LIVE-SELL-1',
+          price: String(liveSellPrice),
+          status: 'filled',
+          order_sol: String(liveSellQty),
+          remain_sol: '0',
+        },
+      },
+    },
+  );
+
+  const liveSellMessage = await liveExecution.manualSell(
+    livePosition?.id ?? '',
+    liveSellQty,
+    'AUTO',
+  );
+  assert.ok(
+    liveSellMessage.includes('status=OPEN'),
+    'Live sell should stay OPEN when exchange still reports open order',
+  );
+
+  const liveSellOrder = orderManager.list().find((item) => item.exchangeOrderId === 'LIVE-SELL-1');
+  assert.equal(liveSellOrder?.status, 'OPEN', 'Live sell order should remain OPEN before sync');
+
+  const syncMessages = await liveExecution.syncActiveOrders();
+  assert.ok(syncMessages.some((item) => item.includes('LIVE-SELL-1')), 'Sync should report updated live sell order');
+
+  const syncedSellOrder = orderManager.list().find((item) => item.exchangeOrderId === 'LIVE-SELL-1');
+  assert.equal(syncedSellOrder?.status, 'FILLED', 'Live sell order should become FILLED after sync');
+
+  const closedPosition = positionManager.getById(livePosition?.id ?? '');
+  assert.equal(closedPosition?.status, 'CLOSED', 'Filled live sell should close the target position');
+
+  const liveCancelSignal = signalEngine.score(makeSnapshot('xrp_idr', 10_000, 9_995, 10_005));
+  const liveCancelOpportunity = makeOpportunity(liveCancelSignal);
+  const liveCancelQty = 150_000 / liveCancelOpportunity.bestAsk;
+
+  liveApi.queueTrade({
+    success: 1,
+    return: {
+      order_id: 'LIVE-BUY-CANCEL-1',
+    },
+  });
+  liveApi.queueOrder('LIVE-BUY-CANCEL-1', {
+    success: 1,
+    return: {
+      order: {
+        order_id: 'LIVE-BUY-CANCEL-1',
+        price: String(liveCancelOpportunity.bestAsk),
+        status: 'open',
+        order_xrp: String(liveCancelQty),
+        remain_xrp: String(liveCancelQty),
+      },
+    },
+  });
+
+  const cancelableBuyMessage = await liveExecution.buy(
+    defaultAccount.id,
+    liveCancelOpportunity,
+    150_000,
+    'AUTO',
+  );
+  assert.ok(
+    cancelableBuyMessage.includes('status=OPEN'),
+    'Live buy should remain OPEN when exchange reports unfilled order',
+  );
+
+  const cancelResult = await liveExecution.cancelAllOrders();
+  assert.ok(cancelResult.includes('Canceled'), 'cancelAllOrders should return summary text');
+
+  const canceledOrder = orderManager
+    .list()
+    .find((item) => item.exchangeOrderId === 'LIVE-BUY-CANCEL-1');
+  assert.equal(canceledOrder?.status, 'CANCELED', 'Live cancel should update local order status');
 
   // Module: worker pool + backtest replay.
   const workerPool = new WorkerPoolService(1, true);
