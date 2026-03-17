@@ -1,0 +1,37 @@
+{
+  "summary": "Backend-only verification completed for startup live-order recovery and reconciliation changes. Build passed, live execution hardening probe passed, runtime backend regression passed, and worker timeout recovery probe passed. Tested exchanges are MOCKED in probes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/live_execution_hardening_probe.ts",
+    "/app/tests/runtime_backend_regression.ts",
+    "/app/tests/worker_timeout_probe.ts"
+  ],
+  "action_items": [
+    "Keep startup recovery assertions in CI (recoverLiveOrdersOnStartup + openOrders-first sync + fallback via getOrder).",
+    "Optional hardening: add explicit assertion in regression probe that missing openOrders method still falls back to getOrder path without state corruption."
+  ],
+  "critical_code_review_comments": [
+    "executionEngine.ts is 851 lines (>700 guideline); split sync/recovery/live-order orchestration into focused modules to reduce regression risk.",
+    "privateApi.ts uses hardcoded default baseUrl fallback; consider environment-driven configuration only for stricter deployment controls."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (skipped by request)"
+  },
+  "seed_data_creation": "No persistent seed data. Isolated DATA_DIR under /tmp used for each probe run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed and passed: (1) yarn build (2) TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it4-live LOG_DIR=/tmp/mafiamarkets-it4-live/logs TEMP_DIR=/tmp/mafiamarkets-it4-live/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts (3) TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it4-reg LOG_DIR=/tmp/mafiamarkets-it4-reg/logs TEMP_DIR=/tmp/mafiamarkets-it4-reg/tmp yarn tsx /app/tests/runtime_backend_regression.ts (4) TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it4-timeout LOG_DIR=/tmp/mafiamarkets-it4-timeout/logs TEMP_DIR=/tmp/mafiamarkets-it4-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts. MOCKED APIs: FakeLiveIndodaxClient/FakeLiveOrderApi/FakeIndodaxClient.",
+  "rca of the issue": "No failing issue reproduced in this iteration. Startup recovery and openOrders reconciliation behavior validated by passing probes, including fallback continuity via runtime regression flow."
+}

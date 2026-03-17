@@ -231,6 +231,8 @@ export async function createApp(): Promise<AppRuntime> {
       await workerPool.start();
     }
 
+    await executionEngine.recoverLiveOrdersOnStartup();
+
     await telegram.start();
     polling.start();
 

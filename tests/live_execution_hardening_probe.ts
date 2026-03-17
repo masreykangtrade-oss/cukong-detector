@@ -17,9 +17,14 @@ import { StateService } from '../src/services/stateService';
 class FakeLiveOrderApi {
   private readonly tradeQueue: Array<Record<string, unknown>> = [];
   private readonly orderQueue = new Map<string, Array<Record<string, unknown>>>();
+  private readonly openOrdersQueue: Array<Record<string, unknown>> = [];
 
   queueTrade(response: Record<string, unknown>) {
     this.tradeQueue.push(response);
+  }
+
+  queueOpenOrders(response: Record<string, unknown>) {
+    this.openOrdersQueue.push(response);
   }
 
   queueOrder(orderId: string, ...responses: Array<Record<string, unknown>>) {
@@ -45,6 +50,20 @@ class FakeLiveOrderApi {
     }
 
     return queue.shift() as Record<string, unknown>;
+  }
+
+  async openOrders() {
+    const next = this.openOrdersQueue.shift();
+    if (!next) {
+      return {
+        success: 1,
+        return: {
+          orders: {},
+        },
+      };
+    }
+
+    return next;
   }
 
   async cancelOrder(_pair: string, orderId: string) {
@@ -185,8 +204,74 @@ async function main() {
     dryRun: false,
     paperTrade: false,
     uiOnly: false,
+    risk: {
+      ...createDefaultSettings().risk,
+      maxOpenPositions: 10,
+    },
   };
   await settings.replace(strictSettings);
+
+  // Startup recovery should sync persisted live order via openOrders.
+  const recoveredOrder = await orderManager.create({
+    accountId: defaultAccount.id,
+    pair: 'matic_idr',
+    side: 'buy',
+    type: 'limit',
+    price: 2500,
+    quantity: 40,
+    source: 'AUTO',
+    status: 'OPEN',
+    exchangeOrderId: 'RECOVER-OPEN-1',
+    exchangeStatus: 'submitted',
+    exchangeUpdatedAt: new Date().toISOString(),
+    notes: 'persisted before restart',
+  });
+
+  liveApi.queueOpenOrders({
+    success: 1,
+    return: {
+      orders: {
+        matic_idr: [
+          {
+            order_id: 'RECOVER-OPEN-1',
+            type: 'buy',
+            price: '2500',
+            order_matic: '40',
+            remain_matic: '15',
+            status: 'open',
+          },
+        ],
+      },
+    },
+  });
+
+  const recoveryMessages = await execution.recoverLiveOrdersOnStartup();
+  assert.ok(
+    recoveryMessages.some((message) => message.includes('RECOVER-OPEN-1')),
+    'recoverLiveOrdersOnStartup should report synced persisted live order',
+  );
+
+  const recoveredAfterStartup = orderManager.getById(recoveredOrder.id);
+  assert.equal(
+    recoveredAfterStartup?.status,
+    'PARTIALLY_FILLED',
+    'Startup recovery should derive partial fill state from openOrders',
+  );
+  assert.equal(
+    recoveredAfterStartup?.filledQuantity,
+    25,
+    'Startup recovery should derive filled quantity from openOrders remain amount',
+  );
+
+  const recoveredPositionQty = positionManager
+    .listOpen()
+    .filter((position) => position.pair === 'matic_idr')
+    .reduce((sum, position) => sum + position.quantity, 0);
+  assert.equal(
+    recoveredPositionQty,
+    25,
+    'Startup recovery should materialize recovered filled quantity into runtime positions',
+  );
 
   // Live buy partial->filled sync should persist exchange order id and apply fill deltas.
   const partialOpportunity = makeOpportunity('doge_idr', 1000);
@@ -194,6 +279,33 @@ async function main() {
   const firstFilled = orderQuantity * 0.4;
 
   liveApi.queueTrade({ success: 1, return: { order_id: 'BUY-PARTIAL-1' } });
+  liveApi.queueOpenOrders({
+    success: 1,
+    return: {
+      orders: {
+        matic_idr: [
+          {
+            order_id: 'RECOVER-OPEN-1',
+            type: 'buy',
+            price: '2500',
+            order_matic: '40',
+            remain_matic: '15',
+            status: 'open',
+          },
+        ],
+        doge_idr: [
+          {
+            order_id: 'BUY-PARTIAL-1',
+            type: 'buy',
+            price: String(partialOpportunity.bestAsk),
+            order_doge: String(orderQuantity),
+            remain_doge: String(orderQuantity - firstFilled),
+            status: 'open',
+          },
+        ],
+      },
+    },
+  });
   liveApi.queueOrder(
     'BUY-PARTIAL-1',
     {
@@ -236,6 +348,35 @@ async function main() {
 
   await execution.syncActiveOrders();
 
+  const afterOpenOrdersSync = orderManager.list().find((o) => o.exchangeOrderId === 'BUY-PARTIAL-1');
+  assert.equal(
+    afterOpenOrdersSync?.status,
+    'PARTIALLY_FILLED',
+    'openOrders sync should preserve partial state while order is still open',
+  );
+
+  liveApi.queueOpenOrders({
+    success: 1,
+    return: {
+      orders: {},
+    },
+  });
+
+  liveApi.queueOrder('RECOVER-OPEN-1', {
+    success: 1,
+    return: {
+      order: {
+        order_id: 'RECOVER-OPEN-1',
+        price: '2500',
+        status: 'open',
+        order_matic: '40',
+        remain_matic: '15',
+      },
+    },
+  });
+
+  await execution.syncActiveOrders();
+
   const afterSyncOrder = orderManager.list().find((o) => o.exchangeOrderId === 'BUY-PARTIAL-1');
   assert.equal(afterSyncOrder?.status, 'FILLED', 'syncActiveOrders should move order to FILLED after exchange fill');
 
@@ -249,6 +390,23 @@ async function main() {
   const dupBuyOpportunity = makeOpportunity('trx_idr', 5000);
   const dupBuyQty = 100_000 / dupBuyOpportunity.bestAsk;
   liveApi.queueTrade({ success: 1, return: { order_id: 'BUY-DUP-1' } });
+  liveApi.queueOpenOrders({
+    success: 1,
+    return: {
+      orders: {
+        trx_idr: [
+          {
+            order_id: 'BUY-DUP-1',
+            type: 'buy',
+            price: String(dupBuyOpportunity.bestAsk),
+            order_trx: String(dupBuyQty),
+            remain_trx: String(dupBuyQty),
+            status: 'open',
+          },
+        ],
+      },
+    },
+  });
   liveApi.queueOrder('BUY-DUP-1', {
     success: 1,
     return: {
@@ -279,6 +437,23 @@ async function main() {
     takeProfitPrice: null,
   });
   liveApi.queueTrade({ success: 1, return: { order_id: 'SELL-DUP-1' } });
+  liveApi.queueOpenOrders({
+    success: 1,
+    return: {
+      orders: {
+        ada_idr: [
+          {
+            order_id: 'SELL-DUP-1',
+            type: 'sell',
+            price: '10000',
+            order_ada: '20',
+            remain_ada: '20',
+            status: 'open',
+          },
+        ],
+      },
+    },
+  });
   liveApi.queueOrder('SELL-DUP-1', {
     success: 1,
     return: {

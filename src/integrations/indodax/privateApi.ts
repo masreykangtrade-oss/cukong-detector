@@ -29,6 +29,14 @@ export interface IndodaxGetOrderReturn {
   order?: Record<string, string | number>;
 }
 
+export interface IndodaxOpenOrdersReturn {
+  orders?: Record<string, Array<Record<string, string | number>>>;
+}
+
+export interface IndodaxOrderHistoryReturn {
+  orders?: Array<Record<string, string | number>>;
+}
+
 export interface IndodaxCancelOrderReturn {
   order_id?: string | number;
   client_order_id?: string;
@@ -121,12 +129,12 @@ export class PrivateApi {
     });
   }
 
-  openOrders<T>(pair?: string): Promise<IndodaxPrivateEnvelope<T>> {
-    return this.post<T>('openOrders', pair ? { pair } : {});
+  openOrders(pair?: string): Promise<IndodaxPrivateEnvelope<IndodaxOpenOrdersReturn>> {
+    return this.post<IndodaxOpenOrdersReturn>('openOrders', pair ? { pair } : {});
   }
 
-  orderHistory<T>(pair?: string): Promise<IndodaxPrivateEnvelope<T>> {
-    return this.post<T>('orderHistory', pair ? { pair } : {});
+  orderHistory(pair?: string): Promise<IndodaxPrivateEnvelope<IndodaxOrderHistoryReturn>> {
+    return this.post<IndodaxOrderHistoryReturn>('orderHistory', pair ? { pair } : {});
   }
 
   getOrder(

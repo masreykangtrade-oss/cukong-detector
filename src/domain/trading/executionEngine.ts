@@ -13,6 +13,7 @@ import { nowIso } from '../../utils/time';
 import { IndodaxClient } from '../../integrations/indodax/client';
 import type {
   IndodaxGetOrderReturn,
+  IndodaxOpenOrdersReturn,
   IndodaxTradeReturn,
 } from '../../integrations/indodax/privateApi';
 import { JournalService } from '../../services/journalService';
@@ -30,6 +31,11 @@ interface ExchangeOrderSnapshot {
   filledQuantity: number;
   remainingQuantity: number | null;
   averageFillPrice: number | null;
+}
+
+interface ExchangeOpenOrderMatch {
+  pair: string;
+  order: Record<string, string | number>;
 }
 
 export class ExecutionEngine {
@@ -106,14 +112,16 @@ export class ExecutionEngine {
     return 'OPEN';
   }
 
-  private buildExchangeSnapshot(
+  private buildExchangeSnapshotFromOrderFields(
     order: OrderRecord,
-    payload: IndodaxGetOrderReturn,
+    exchangeOrder: Record<string, string | number>,
+    fallbackStatus = 'open',
   ): ExchangeOrderSnapshot {
-    const exchangeOrder = payload.order ?? {};
     const asset = this.baseAsset(order.pair);
     const orderedQuantity =
-      this.toFiniteNumber(exchangeOrder[`order_${asset}`]) ?? order.quantity;
+      this.toFiniteNumber(exchangeOrder[`order_${asset}`]) ??
+      this.toFiniteNumber(exchangeOrder[asset]) ??
+      order.quantity;
     const remainingQuantity =
       this.toFiniteNumber(exchangeOrder[`remain_${asset}`]) ??
       this.toFiniteNumber(exchangeOrder.remain) ??
@@ -126,11 +134,68 @@ export class ExecutionEngine {
       exchangeStatus:
         typeof exchangeOrder.status === 'string' && exchangeOrder.status.trim()
           ? exchangeOrder.status
-          : 'open',
+          : fallbackStatus,
       filledQuantity,
       remainingQuantity,
       averageFillPrice: this.toFiniteNumber(exchangeOrder.price) ?? order.averageFillPrice ?? order.price,
     };
+  }
+
+  private buildExchangeSnapshot(
+    order: OrderRecord,
+    payload: IndodaxGetOrderReturn,
+  ): ExchangeOrderSnapshot {
+    return this.buildExchangeSnapshotFromOrderFields(order, payload.order ?? {}, 'open');
+  }
+
+  private flattenOpenOrders(payload: IndodaxOpenOrdersReturn): Map<string, ExchangeOpenOrderMatch> {
+    const matches = new Map<string, ExchangeOpenOrderMatch>();
+
+    for (const [pair, orders] of Object.entries(payload.orders ?? {})) {
+      for (const order of orders ?? []) {
+        const orderId = order.order_id;
+        if (orderId === undefined || orderId === null) {
+          continue;
+        }
+
+        matches.set(String(orderId), { pair, order });
+      }
+    }
+
+    return matches;
+  }
+
+  private async syncOrderWithSnapshot(
+    order: OrderRecord,
+    snapshot: ExchangeOrderSnapshot,
+    source: 'getOrder' | 'openOrders',
+  ): Promise<OrderRecord | undefined> {
+    const averageFillPrice = snapshot.averageFillPrice ?? order.price;
+
+    await this.applyFillDelta(order, snapshot.filledQuantity, averageFillPrice);
+
+    return this.orders.update(order.id, {
+      status: this.mapExchangeStatus(snapshot, order.quantity),
+      filledQuantity: snapshot.filledQuantity,
+      averageFillPrice,
+      exchangeStatus: snapshot.exchangeStatus,
+      exchangeUpdatedAt: nowIso(),
+      notes: this.appendNotes(
+        order.notes,
+        `${source}=${snapshot.exchangeStatus}`,
+      ),
+    });
+  }
+
+  private async fetchOpenOrdersForAccount(accountId: string): Promise<Map<string, ExchangeOpenOrderMatch>> {
+    const account = this.accounts.getById(accountId);
+    if (!account) {
+      return new Map();
+    }
+
+    const api = this.indodax.forAccount(account);
+    const response = await api.openOrders();
+    return this.flattenOpenOrders(response.return ?? {});
   }
 
   private async applyFillDelta(
@@ -206,21 +271,7 @@ export class ExecutionEngine {
     const api = this.indodax.forAccount(account);
     const response = await api.getOrder(order.pair, order.exchangeOrderId);
     const snapshot = this.buildExchangeSnapshot(order, response.return ?? {});
-    const averageFillPrice = snapshot.averageFillPrice ?? order.price;
-
-    await this.applyFillDelta(order, snapshot.filledQuantity, averageFillPrice);
-
-    return this.orders.update(order.id, {
-      status: this.mapExchangeStatus(snapshot, order.quantity),
-      filledQuantity: snapshot.filledQuantity,
-      averageFillPrice,
-      exchangeStatus: snapshot.exchangeStatus,
-      exchangeUpdatedAt: nowIso(),
-      notes: this.appendNotes(
-        order.notes,
-        `exchangeStatus=${snapshot.exchangeStatus}`,
-      ),
-    });
+    return this.syncOrderWithSnapshot(order, snapshot, 'getOrder');
   }
 
   private extractExchangeOrderId(response: IndodaxTradeReturn | undefined): string | undefined {
@@ -624,10 +675,62 @@ export class ExecutionEngine {
       return [];
     }
 
+    const activeOrders = this.orders
+      .listActive()
+      .filter((order) => Boolean(order.exchangeOrderId));
     const messages: string[] = [];
+    const processedOrderIds = new Set<string>();
+    const ordersByAccount = new Map<string, OrderRecord[]>();
 
-    for (const activeOrder of this.orders.listActive()) {
-      if (!activeOrder.exchangeOrderId) {
+    for (const order of activeOrders) {
+      const current = ordersByAccount.get(order.accountId) ?? [];
+      current.push(order);
+      ordersByAccount.set(order.accountId, current);
+    }
+
+    for (const [accountId, accountOrders] of ordersByAccount.entries()) {
+      try {
+        const openOrders = await this.fetchOpenOrdersForAccount(accountId);
+
+        for (const order of accountOrders) {
+          if (!order.exchangeOrderId) {
+            continue;
+          }
+
+          const openOrder = openOrders.get(order.exchangeOrderId);
+          if (!openOrder) {
+            continue;
+          }
+
+          processedOrderIds.add(order.id);
+          const beforeStatus = order.status;
+          const beforeFilled = order.filledQuantity;
+          const snapshot = this.buildExchangeSnapshotFromOrderFields(order, openOrder.order, 'open');
+          const synced = await this.syncOrderWithSnapshot(order, snapshot, 'openOrders');
+
+          if (
+            synced &&
+            (synced.status !== beforeStatus || synced.filledQuantity !== beforeFilled)
+          ) {
+            messages.push(
+              this.formatLiveOrderMessage(
+                synced.side.toUpperCase() as 'BUY' | 'SELL',
+                synced,
+              ),
+            );
+          }
+        }
+      } catch (error) {
+        await this.journal.warn(
+          'OPEN_ORDERS_SYNC_FAILED',
+          error instanceof Error ? error.message : 'unknown openOrders sync failure',
+          { accountId },
+        );
+      }
+    }
+
+    for (const activeOrder of activeOrders) {
+      if (processedOrderIds.has(activeOrder.id)) {
         continue;
       }
 
@@ -654,6 +757,34 @@ export class ExecutionEngine {
         );
       }
     }
+
+    return messages;
+  }
+
+  async recoverLiveOrdersOnStartup(): Promise<string[]> {
+    const settings = this.settings.get();
+    if (this.shouldSimulate(settings.tradingMode, settings)) {
+      return [];
+    }
+
+    const activeLiveOrders = this.orders
+      .listActive()
+      .filter((order) => Boolean(order.exchangeOrderId));
+
+    if (activeLiveOrders.length === 0) {
+      return [];
+    }
+
+    const messages = await this.syncActiveOrders();
+
+    await this.journal.info(
+      'LIVE_ORDER_RECOVERY_COMPLETED',
+      'startup live order recovery completed',
+      {
+        activeLiveOrders: activeLiveOrders.length,
+        updatedOrders: messages.length,
+      },
+    );
 
     return messages;
   }
