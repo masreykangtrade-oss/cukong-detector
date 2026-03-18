@@ -15,6 +15,7 @@ import { IndodaxClient } from '../../integrations/indodax/client';
 import type {
   IndodaxGetOrderReturn,
   IndodaxOpenOrdersReturn,
+  IndodaxOrderHistoryReturn,
   IndodaxTradeHistoryReturn,
   IndodaxTradeReturn,
 } from '../../integrations/indodax/privateApi';
@@ -255,6 +256,24 @@ export class ExecutionEngine {
     return matches;
   }
 
+  private findOrderHistoryMatch(
+    order: OrderRecord,
+    payload: IndodaxOrderHistoryReturn,
+  ): Record<string, string | number> | null {
+    const exchangeOrderId = order.exchangeOrderId ? String(order.exchangeOrderId) : null;
+    if (!exchangeOrderId) {
+      return null;
+    }
+
+    const orders = Array.isArray(payload.orders) ? payload.orders : [];
+    return (
+      orders.find((candidate) => {
+        const orderId = candidate.order_id;
+        return orderId !== undefined && orderId !== null && String(orderId) === exchangeOrderId;
+      }) ?? null
+    );
+  }
+
   private parseTradeTimestamp(raw: Record<string, string | number>): string | null {
     const candidates = [raw.timestamp, raw.trade_time, raw.submit_time, raw.finish_time];
 
@@ -363,8 +382,70 @@ export class ExecutionEngine {
       return null;
     }
 
-    const response = await api.tradeHistory(order.pair);
-    return this.extractTradeStats(order, response.return ?? {});
+    try {
+      const response = await api.tradeHistory(order.pair);
+      return this.extractTradeStats(order, response.return ?? {});
+    } catch (error) {
+      await this.journal.warn(
+        'TRADE_HISTORY_SYNC_FAILED',
+        error instanceof Error ? error.message : 'unknown tradeHistory sync failure',
+        {
+          orderId: order.id,
+          exchangeOrderId: order.exchangeOrderId,
+          pair: order.pair,
+        },
+      );
+      return null;
+    }
+  }
+
+  private async loadOrderHistorySnapshot(
+    order: OrderRecord,
+  ): Promise<ExchangeOrderSnapshot | null> {
+    const api = this.getPrivateApi(order.accountId);
+    if (!api || typeof (api as { orderHistory?: unknown }).orderHistory !== 'function') {
+      return null;
+    }
+
+    try {
+      const response = await api.orderHistory(order.pair);
+      const match = this.findOrderHistoryMatch(order, response.return ?? {});
+      return match ? this.buildExchangeSnapshotFromOrderFields(order, match, 'closed') : null;
+    } catch (error) {
+      await this.journal.warn(
+        'ORDER_HISTORY_SYNC_FAILED',
+        error instanceof Error ? error.message : 'unknown orderHistory sync failure',
+        {
+          orderId: order.id,
+          exchangeOrderId: order.exchangeOrderId,
+          pair: order.pair,
+        },
+      );
+      return null;
+    }
+  }
+
+  private buildTradeStatsFallbackSnapshot(
+    order: OrderRecord,
+    tradeStats: ExchangeTradeStats | null,
+  ): ExchangeOrderSnapshot | null {
+    if (!tradeStats || tradeStats.filledQuantity === null) {
+      return null;
+    }
+
+    const filledQuantity = Math.max(order.filledQuantity, tradeStats.filledQuantity);
+    if (filledQuantity <= order.filledQuantity + 1e-8) {
+      return null;
+    }
+
+    const isFilled = filledQuantity >= order.quantity - 1e-8;
+
+    return {
+      exchangeStatus: isFilled ? 'filled_from_trade_history' : 'partial_from_trade_history',
+      filledQuantity: Math.min(order.quantity, filledQuantity),
+      remainingQuantity: Math.max(0, order.quantity - filledQuantity),
+      averageFillPrice: tradeStats.averageFillPrice ?? order.averageFillPrice ?? order.price,
+    };
   }
 
   private async syncOrderWithSnapshot(
@@ -534,13 +615,44 @@ export class ExecutionEngine {
     }
 
     const api = this.indodax.forAccount(account);
-    const response = await api.getOrder(order.pair, order.exchangeOrderId);
-    const snapshot = this.buildExchangeSnapshot(order, response.return ?? {});
     const tradeStats = await this.loadTradeStats(order);
+    let snapshot: ExchangeOrderSnapshot | null = null;
+
+    try {
+      const response = await api.getOrder(order.pair, order.exchangeOrderId);
+      snapshot = this.buildExchangeSnapshot(order, response.return ?? {});
+    } catch (error) {
+      await this.journal.warn(
+        'GET_ORDER_SYNC_FAILED',
+        error instanceof Error ? error.message : 'unknown getOrder sync failure',
+        {
+          orderId: order.id,
+          exchangeOrderId: order.exchangeOrderId,
+          pair: order.pair,
+        },
+      );
+    }
+
+    if (!snapshot) {
+      snapshot = await this.loadOrderHistorySnapshot(order);
+    }
+
+    if (!snapshot) {
+      snapshot = this.buildTradeStatsFallbackSnapshot(order, tradeStats);
+    }
+
+    if (!snapshot) {
+      throw new Error(`Unable to reconcile live order ${order.exchangeOrderId}`);
+    }
+
     return this.syncOrderWithSnapshot(
       order,
       this.mergeTradeStatsIntoSnapshot(snapshot, tradeStats),
-      'getOrder',
+      snapshot.exchangeStatus.includes('trade_history')
+        ? 'getOrder'
+        : snapshot.exchangeStatus === 'closed'
+          ? 'getOrder'
+          : 'getOrder',
       tradeStats,
     );
   }
@@ -757,6 +869,10 @@ export class ExecutionEngine {
     const account = this.accounts.getDefault();
     if (!account) {
       throw new Error('Default account tidak tersedia');
+    }
+
+    if (this.hasActiveOrder(signal.pair, 'buy', account.id)) {
+      return `skip auto-buy ${signal.pair}: active BUY order already exists`;
     }
 
     return this.buy(account.id, signal, settings.risk.maxPositionSizeIdr, 'AUTO');
@@ -1205,6 +1321,11 @@ export class ExecutionEngine {
         continue;
       }
 
+      if (this.hasActiveOrder(position.pair, 'sell', position.accountId, position.id)) {
+        messages.push(`${position.pair} exit skipped: active SELL order already exists`);
+        continue;
+      }
+
       await this.manualSell(position.id, position.quantity, 'AUTO', exit.reason ?? 'AUTO_EXIT');
       messages.push(`${position.pair} exit by ${exit.reason}`);
     }
@@ -1262,6 +1383,10 @@ export class ExecutionEngine {
     const openPositions: PositionRecord[] = this.positions.listOpen();
 
     for (const position of openPositions) {
+      if (this.hasActiveOrder(position.pair, 'sell', position.accountId, position.id)) {
+        continue;
+      }
+
       await this.manualSell(position.id, position.quantity, 'AUTO', 'SELL_ALL_POSITIONS');
     }
 

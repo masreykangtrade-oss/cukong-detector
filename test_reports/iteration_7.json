@@ -1,0 +1,44 @@
+{
+  "summary": "Backend-only verification completed for restart/live-order hardening and reconciliation safety. lint/build passed; runtime regression, live execution hardening, worker timeout, and FAILED summary probes all passed using MOCKED exchange clients.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "ExecutionEngine.sellAllPositions",
+        "issue": "Return message always says 'Closed {openPositions.length} positions' even when some positions are skipped due to active SELL orders; operational summary can be misleading during incidents."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/live_execution_hardening_probe.ts",
+    "/app/tests/runtime_backend_regression.ts",
+    "/app/tests/execution_summary_failed_probe.ts",
+    "/app/tests/worker_timeout_probe.ts"
+  ],
+  "action_items": [
+    "Adjust sellAllPositions summary to report actual executed SELL count vs skipped positions.",
+    "Keep these four probes as mandatory CI gates for restart recovery and duplicate-order prevention.",
+    "Optionally add a dedicated regression asserting repeated syncActiveOrders does not change position quantity when filled quantity is unchanged."
+  ],
+  "critical_code_review_comments": [
+    "executionEngine.ts remains oversized (>700 lines) and mixes reconciliation, execution, and side-effects; split modules to reduce production regression blast radius.",
+    "syncLiveOrder source tagging is always 'getOrder' even in fallback paths, reducing observability for incident RCA."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_7.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (skipped by request)"
+  },
+  "seed_data_creation": "No persistent seed data. Isolated DATA_DIR under /tmp used per probe run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed and passed: yarn lint && yarn build; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it7-live LOG_DIR=/tmp/mafiamarkets-it7-live/logs TEMP_DIR=/tmp/mafiamarkets-it7-live/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it7-reg LOG_DIR=/tmp/mafiamarkets-it7-reg/logs TEMP_DIR=/tmp/mafiamarkets-it7-reg/tmp yarn tsx /app/tests/runtime_backend_regression.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it7-failed LOG_DIR=/tmp/mafiamarkets-it7-failed/logs TEMP_DIR=/tmp/mafiamarkets-it7-failed/tmp yarn tsx /app/tests/execution_summary_failed_probe.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it7-timeout LOG_DIR=/tmp/mafiamarkets-it7-timeout/logs TEMP_DIR=/tmp/mafiamarkets-it7-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts. MOCKED APIs: FakeLiveIndodaxClient/FakeLiveOrderApi/FakeIndodaxClient. Telegram live delivery not validated end-to-end.",
+  "rca of the issue": "No blocking failure reproduced in this iteration. Duplicate submit/cancel/sell protections behaved deterministically in probes: hasActiveOrder guards prevented repeat BUY/SELL, and fill delta application stayed monotonic via deltaFilled=max(0,nextFilled-currentFilled). Minor RCA: sellAllPositions reporting uses initial open position count instead of actual successful closes, which can mislead operational reconciliation messages."
+}

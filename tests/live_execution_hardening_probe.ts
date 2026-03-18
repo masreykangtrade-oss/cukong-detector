@@ -20,6 +20,7 @@ class FakeLiveOrderApi {
   private readonly tradeQueue: Array<Record<string, unknown>> = [];
   private readonly orderQueue = new Map<string, Array<Record<string, unknown>>>();
   private readonly openOrdersQueue: Array<Record<string, unknown>> = [];
+  private readonly orderHistoryQueue: Array<Record<string, unknown>> = [];
   private readonly tradeHistoryQueue: Array<Record<string, unknown>> = [];
 
   queueTrade(response: Record<string, unknown>) {
@@ -28,6 +29,10 @@ class FakeLiveOrderApi {
 
   queueOpenOrders(response: Record<string, unknown>) {
     this.openOrdersQueue.push(response);
+  }
+
+  queueOrderHistory(response: Record<string, unknown>) {
+    this.orderHistoryQueue.push(response);
   }
 
   queueTradeHistory(response: Record<string, unknown>) {
@@ -80,6 +85,20 @@ class FakeLiveOrderApi {
         success: 1,
         return: {
           trades: [],
+        },
+      };
+    }
+
+    return next;
+  }
+
+  async orderHistory() {
+    const next = this.orderHistoryQueue.shift();
+    if (!next) {
+      return {
+        success: 1,
+        return: {
+          orders: [],
         },
       };
     }
@@ -512,6 +531,13 @@ async function main() {
   });
   await execution.buy(defaultAccount.id, dupBuyOpportunity, 100_000, 'AUTO');
 
+  const skippedAutoBuy = await execution.attemptAutoBuy(dupBuyOpportunity);
+  assert.match(
+    skippedAutoBuy,
+    /skip auto-buy/,
+    'attemptAutoBuy should skip deterministically when active BUY order already exists',
+  );
+
   await assert.rejects(
     () => execution.buy(defaultAccount.id, dupBuyOpportunity, 100_000, 'AUTO'),
     /Masih ada order BUY aktif/,
@@ -525,7 +551,7 @@ async function main() {
     quantity: 50,
     entryPrice: 10_000,
     stopLossPrice: null,
-    takeProfitPrice: null,
+    takeProfitPrice: 10_050,
   });
   liveApi.queueTrade({ success: 1, return: { order_id: 'SELL-DUP-1' } });
   liveApi.queueOrder('SELL-DUP-1', {
@@ -546,6 +572,24 @@ async function main() {
     () => execution.manualSell(seededPosition.id, 5, 'AUTO'),
     /Masih ada order SELL aktif/,
     'Duplicate active SELL should be rejected before sending live order',
+  );
+
+  await positionManager.updateMark('ada_idr', 10_100);
+  const beforeEvaluateSellOrderCount = orderManager
+    .list()
+    .filter((order) => order.side === 'sell' && order.relatedPositionId === seededPosition.id).length;
+  const evaluateMessages = await execution.evaluateOpenPositions();
+  const afterEvaluateSellOrderCount = orderManager
+    .list()
+    .filter((order) => order.side === 'sell' && order.relatedPositionId === seededPosition.id).length;
+  assert.ok(
+    evaluateMessages.some((message) => message.includes('exit skipped')),
+    'evaluateOpenPositions should skip deterministic auto-sell when active SELL order already exists',
+  );
+  assert.equal(
+    afterEvaluateSellOrderCount,
+    beforeEvaluateSellOrderCount,
+    'evaluateOpenPositions should not submit duplicate SELL order during recovery-safe auto exit',
   );
 
   // cancelAllOrders should cancel all active live orders locally.
@@ -601,6 +645,82 @@ async function main() {
     staleAfterSync?.exchangeStatus,
     'canceled_after_timeout',
     'Timeout cancellation should be reflected in exchange status field',
+  );
+
+  const historyRecoveredOrder = await orderManager.create({
+    accountId: defaultAccount.id,
+    pair: 'xlm_idr',
+    side: 'buy',
+    type: 'limit',
+    price: 100,
+    quantity: 200,
+    source: 'AUTO',
+    status: 'OPEN',
+    referencePrice: 100,
+    exchangeOrderId: 'RECOVER-HISTORY-1',
+    exchangeStatus: 'submitted',
+    exchangeUpdatedAt: new Date().toISOString(),
+    notes: 'persisted for orderHistory fallback test',
+  });
+
+  liveApi.queueOpenOrders({
+    success: 1,
+    return: {
+      orders: {},
+    },
+  });
+  liveApi.queueTradeHistory({
+    success: 1,
+    return: {
+      trades: [
+        {
+          order_id: 'RECOVER-HISTORY-1',
+          price: '101',
+          xlm: '200',
+          fee_idr: '5',
+          timestamp: String(Date.now()),
+        },
+      ],
+    },
+  });
+  liveApi.queueOrderHistory({
+    success: 1,
+    return: {
+      orders: [
+        {
+          order_id: 'RECOVER-HISTORY-1',
+          price: '101',
+          order_xlm: '200',
+          remain_xlm: '0',
+          status: 'filled',
+        },
+      ],
+    },
+  });
+
+  const historyRecoveryMessages = await execution.recoverLiveOrdersOnStartup();
+  assert.ok(
+    historyRecoveryMessages.some((message) => message.includes('RECOVER-HISTORY-1')),
+    'Recovery should reconcile terminal order via orderHistory fallback when getOrder is unavailable',
+  );
+
+  const historyRecoveredAfter = orderManager.getById(historyRecoveredOrder.id);
+  assert.equal(
+    historyRecoveredAfter?.status,
+    'FILLED',
+    'orderHistory fallback should move persisted live order to FILLED when exchange history is terminal',
+  );
+  assert.equal(
+    historyRecoveredAfter?.feeAmount,
+    5,
+    'orderHistory fallback should still merge fee from tradeHistory when available',
+  );
+  const historyRecoveredPosition = positionManager
+    .listOpen()
+    .find((position) => position.pair === 'xlm_idr' && position.accountId === defaultAccount.id);
+  assert.ok(
+    historyRecoveredPosition,
+    'orderHistory fallback should materialize filled quantity into runtime position state after restart',
   );
 
   console.log('PASS live_execution_hardening_probe');
