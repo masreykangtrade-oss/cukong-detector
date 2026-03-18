@@ -37,6 +37,25 @@ Komponen yang sudah terhubung:
 - callback server Indodax terpisah port, env-driven, dan persist event
 - nginx template + renderer berbasis `.env`
 
+## Status komponen blueprint besar
+
+Sudah terimplementasi dan terhubung di repo:
+
+- `MarketWatcher`, `SignalEngine`, `OpportunityAssessment`, `ExecutionEngine`
+- layer `intelligence`, `microstructure`, `history`, `backtest`, dan `workers`
+- execution summary + trade outcome summary
+- Telegram UI operasional, whitelist, accounts, settings, backtest hooks
+- callback server + nginx renderer + env-driven config contract
+
+Sudah ada di repo tetapi belum terbukti dari runtime publik aktif:
+
+- ingress publik yang benar-benar mengarahkan `/healthz` ke app server repo
+- ingress publik yang benar-benar mengarahkan `/indodax/callback` ke callback server repo
+
+Masih parsial / masih membawa compatibility layer:
+
+- jalur execution/recovery masih memegang legacy `/tapi` dan Trade API 2.0 sekaligus untuk alasan compatibility/recovery
+
 ## Telegram UI operasional
 
 Main menu operasional berisi 7 kategori:

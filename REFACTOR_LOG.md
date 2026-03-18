@@ -26,6 +26,27 @@ Yang sudah tercapai:
 Yang masih menjadi blocker operasional:
 
 - runtime/domain publik aktif `kangtrade.top` belum terbukti memakai wiring repo ini secara end-to-end
+- `kangtrade.top` saat diuji merespons dari `nginx/1.24.0 (Ubuntu)` pada IP `103.160.62.162`, sedangkan preview runtime repo saat diuji masih `502` dan belum responsif
+
+## 1A. Status komponen besar dari blueprint
+
+### Sudah terimplementasi dan terhubung di repo
+
+- `MarketWatcher`, `SignalEngine`, `OpportunityAssessment`, `ExecutionEngine`
+- domain `intelligence`, `microstructure`, `history`, `backtest`, `workers`
+- Telegram operational UI + whitelist + menu hierarkis
+- execution summary + trade outcome summary
+- callback server env-driven + persistence callback event/state
+- nginx renderer env-driven
+
+### Sudah ada di repo tetapi belum terbukti dari runtime publik aktif
+
+- jalur publik `/healthz` → app server repo
+- jalur publik `/indodax/callback` → callback server repo
+
+### Masih parsial
+
+- execution/recovery masih membawa compatibility layer legacy `/tapi` + V2
 
 ---
 
@@ -161,6 +182,7 @@ Contract V2 yang sudah diterapkan:
 - `https://kangtrade.top/healthz` publik belum terbukti mengarah ke runtime repo ini
 - `https://kangtrade.top/indodax/callback` publik belum terbukti dilayani callback server repo ini
 - karena dua jalur publik inti itu belum sinkron, arsitektur repo sudah rapi tetapi wiring domain publik aktif belum terbukti sama dengan repo
+- preview runtime repo yang terhubung ke platform juga masih `502`, jadi belum ada bukti bahwa runtime aktif saat ini benar-benar memakai hasil render terbaru
 
 ### P1
 
