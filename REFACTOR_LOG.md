@@ -183,6 +183,7 @@ Contract V2 yang sudah diterapkan:
 - `https://kangtrade.top/indodax/callback` publik belum terbukti dilayani callback server repo ini
 - karena dua jalur publik inti itu belum sinkron, arsitektur repo sudah rapi tetapi wiring domain publik aktif belum terbukti sama dengan repo
 - preview runtime repo yang terhubung ke platform juga masih `502`, jadi belum ada bukti bahwa runtime aktif saat ini benar-benar memakai hasil render terbaru
+- blocker ini sekarang harus dianggap **terblokir karena akses deploy/runtime**, bukan karena desain repo
 
 ### P1
 

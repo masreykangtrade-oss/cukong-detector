@@ -201,5 +201,6 @@ Probe yang harus lulus:
 - Trade API v2 Indodax memakai base resmi `https://tapi.indodax.com`, header `X-APIKEY`, dan query signature
 - callback server lokal sudah memprioritaskan host langsung agar spoof `X-Forwarded-Host` tidak mengalahkan host publik valid
 - live domain publik tetap harus benar-benar memakai nginx hasil render terbaru agar `/healthz` dan callback target sesuai repo ini
+- penutupan blocker runtime publik aktif membutuhkan akses deploy/runtime yang tidak tersedia dari repo saja bila custom domain/ingress aktif berada di luar environment ini
 
 Lihat `REFACTOR_LOG.md` untuk audit lengkap dan `SESSION_CONTEXT_NEXT.md` untuk konteks sesi berikutnya.
