@@ -60,8 +60,8 @@ export function isTelegramMenuId(value?: string): value is TelegramMenuId {
 export const TELEGRAM_MAIN_MENU = {
   EXECUTE: '⚡ Execute Trade',
   EMERGENCY: '🚨 Emergency Controls',
-  MONITORING: '📡 Monitoring / Laporan',
-  TRADE: '📦 Positions / Orders / Manual Trade',
+  MONITORING: '📡 Monitoring',
+  TRADE: '📦 Positions',
   SETTINGS: '⚙️ Settings',
   ACCOUNTS: '👤 Accounts',
   BACKTEST: '🧪 Backtest',
