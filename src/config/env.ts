@@ -45,6 +45,7 @@ export interface EnvConfig {
 
   indodaxPublicBaseUrl: string;
   indodaxPrivateBaseUrl: string;
+  indodaxTradeApiV2BaseUrl: string;
   indodaxTimeoutMs: number;
   indodaxHistoryMode: IndodaxHistoryMode;
   indodaxCallbackPath: string;
@@ -222,7 +223,7 @@ export const env: EnvConfig = {
   nodeEnv: readString('NODE_ENV', 'development'),
   appName: readString('APP_NAME', 'mafiamarkets'),
   publicBaseUrl,
-  appPort: readNumber('APP_PORT', 8787),
+  appPort: readNumber('APP_PORT', 3000),
   appBindHost: readString('APP_BIND_HOST', '0.0.0.0'),
 
   telegramToken: readRequiredString('TELEGRAM_BOT_TOKEN'),
@@ -265,10 +266,14 @@ export const env: EnvConfig = {
     'INDODAX_PRIVATE_BASE_URL',
     'https://indodax.com/tapi',
   ),
+  indodaxTradeApiV2BaseUrl: readString(
+    'INDODAX_TRADE_API_V2_BASE_URL',
+    'https://tapi.indodax.com',
+  ),
   indodaxTimeoutMs: readNumber('INDODAX_TIMEOUT_MS', 15_000),
   indodaxHistoryMode: readStringEnum('INDODAX_HISTORY_MODE', historyModes, 'v2_prefer'),
   indodaxCallbackPath,
-  indodaxCallbackPort: readNumber('INDODAX_CALLBACK_PORT', 8788),
+  indodaxCallbackPort: readNumber('INDODAX_CALLBACK_PORT', 3001),
   indodaxCallbackBindHost: readString('INDODAX_CALLBACK_BIND_HOST', '0.0.0.0'),
   indodaxCallbackAllowedHost: readString(
     'INDODAX_CALLBACK_ALLOWED_HOST',

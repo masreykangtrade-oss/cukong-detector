@@ -19,6 +19,7 @@ export class IndodaxClient {
   forAccount(account: StoredAccount): PrivateApi {
     return new PrivateApi({
       baseUrl: env.indodaxPrivateBaseUrl,
+      tradeApiV2BaseUrl: env.indodaxTradeApiV2BaseUrl,
       apiKey: account.apiKey,
       apiSecret: account.apiSecret,
     });

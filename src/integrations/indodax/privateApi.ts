@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 export interface IndodaxPrivateApiOptions {
   baseUrl: string;
+  tradeApiV2BaseUrl?: string;
   apiKey: string;
   apiSecret: string;
 }
@@ -47,6 +48,9 @@ export interface IndodaxHistoryQueryOptions {
   pair?: string;
   limit?: number;
   orderId?: string | number;
+  startTime?: number;
+  endTime?: number;
+  sort?: 'asc' | 'desc';
 }
 
 export interface IndodaxCancelOrderReturn {
@@ -75,6 +79,27 @@ function normalizePair(pair?: string): string | undefined {
   }
 
   return normalized;
+}
+
+function toTradeApiV2Symbol(pair?: string): string | undefined {
+  return normalizePair(pair)?.replace(/_/g, '');
+}
+
+function normalizeOrderSide(value: unknown, fallback?: 'buy' | 'sell'): 'buy' | 'sell' | '' {
+  if (typeof value === 'boolean') {
+    return value ? 'buy' : 'sell';
+  }
+
+  if (typeof value !== 'string') {
+    return fallback ?? '';
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'buy' || normalized === 'sell') {
+    return normalized;
+  }
+
+  return fallback ?? '';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -127,11 +152,13 @@ function stringifyHeaders(headers: Headers): Record<string, string> {
 
 export class PrivateApi {
   private readonly baseUrl: string;
+  private readonly tradeApiV2BaseUrl: string;
   private readonly apiKey: string;
   private readonly apiSecret: string;
 
   constructor(options: IndodaxPrivateApiOptions) {
     this.baseUrl = options.baseUrl;
+    this.tradeApiV2BaseUrl = options.tradeApiV2BaseUrl ?? 'https://tapi.indodax.com';
     this.apiKey = options.apiKey;
     this.apiSecret = options.apiSecret;
   }
@@ -199,23 +226,38 @@ export class PrivateApi {
         .map(([key, value]) => [key, String(value)]),
     );
 
-    const requestUrl = new URL(path, this.baseUrl);
-    if (query.size > 0) {
-      requestUrl.search = query.toString();
+    if (!query.has('timestamp') && !query.has('nonce')) {
+      query.set('timestamp', String(Date.now()));
+    }
+    if (query.has('timestamp') && !query.has('recvWindow')) {
+      query.set('recvWindow', '5000');
     }
 
-    const signatureSource = requestUrl.pathname + (requestUrl.search ? `?${requestUrl.searchParams.toString()}` : '');
+    const requestUrl = new URL(path, this.tradeApiV2BaseUrl);
+    requestUrl.search = query.toString();
+
     const response = await fetch(requestUrl, {
       method: 'GET',
       headers: {
-        Key: this.apiKey,
-        Sign: this.sign(signatureSource),
+        'X-APIKEY': this.apiKey,
+        Sign: this.sign(query.toString()),
         Accept: 'application/json',
+        'Content-Type': 'application/json',
       },
     });
 
     if (!response.ok) {
-      throw new Error(`Private API GET ${requestUrl.pathname} failed: ${response.status}`);
+      const errorPayload = await response
+        .json()
+        .catch(async () => ({ error: await response.text().catch(() => '') }));
+      const errorRecord = asRecord(errorPayload);
+      throw new Error(
+        String(
+          errorRecord?.error ??
+            errorRecord?.message ??
+            `Private API GET ${requestUrl.pathname} failed: ${response.status}`,
+        ),
+      );
     }
 
     const payload = (await response.json()) as T;
@@ -231,13 +273,20 @@ export class PrivateApi {
       pair ?? String(readValue(item, ['pair', 'market', 'symbol', 'trade_pair']) ?? ''),
     );
     const asset = getSellAssetKey(normalizedPair ?? 'amount_idr');
-    const filled = readValue(item, ['filled_qty', 'filled_quantity', 'executed_qty']);
+    const filled = readValue(item, ['filled_qty', 'filled_quantity', 'executed_qty', 'executedQty']);
     const remaining = readValue(item, ['remaining_qty', 'remain_qty', 'remaining', 'leaves_qty', 'remain']);
     const quantity =
-      readValue(item, [`order_${asset}`, asset, 'amount', 'quantity', 'qty', 'volume']) ??
+      readValue(item, [`order_${asset}`, asset, 'amount', 'quantity', 'qty', 'volume', 'oriQty']) ??
       ((Number(filled ?? 0) || Number(remaining ?? 0)) > 0
         ? (Number(filled ?? 0) + Number(remaining ?? 0))
         : undefined);
+    const computedRemaining =
+      remaining ??
+      (quantity !== undefined && filled !== undefined
+        ? typeof quantity === 'string' || typeof filled === 'string'
+          ? String(Math.max(0, Number(quantity) - Number(filled)))
+          : Math.max(0, Number(quantity) - Number(filled))
+        : 0);
     const orderId = readValue(item, ['order_id', 'id', 'orderId']);
 
     if (orderId === undefined || orderId === null) {
@@ -247,18 +296,18 @@ export class PrivateApi {
     return {
       order_id: String(orderId),
       pair: normalizedPair ?? pair ?? '',
-      type: String(readValue(item, ['type', 'side']) ?? ''),
+      type: normalizeOrderSide(readValue(item, ['type', 'side'])),
       price: readValue(item, ['price', 'order_price', 'avg_price', 'average_price']) as string | number,
       [`order_${asset}`]: quantity as string | number,
-      [`remain_${asset}`]: (remaining ?? 0) as string | number,
+      [`remain_${asset}`]: computedRemaining as string | number,
       status: String(
         readValue(item, ['status', 'order_status', 'state']) ??
-          (Number(remaining ?? 0) <= 0 ? 'filled' : 'open'),
+          (Number(computedRemaining ?? 0) <= 0 ? 'filled' : 'open'),
       ),
-      submit_time: readValue(item, ['submit_time', 'created_at', 'createdAt', 'timestamp', 'time']) as
+      submit_time: readValue(item, ['submit_time', 'created_at', 'createdAt', 'timestamp', 'time', 'submitTime']) as
         | string
         | number,
-      finish_time: readValue(item, ['finish_time', 'updated_at', 'updatedAt', 'closed_at', 'closedAt']) as
+      finish_time: readValue(item, ['finish_time', 'updated_at', 'updatedAt', 'closed_at', 'closedAt', 'finishTime']) as
         | string
         | number,
     };
@@ -279,15 +328,19 @@ export class PrivateApi {
     }
 
     const feeAsset = String(
-      readValue(item, ['fee_asset', 'commission_asset', 'feeAsset']) ??
+      readValue(item, ['fee_asset', 'commission_asset', 'feeAsset', 'commissionAsset']) ??
         (normalizedPair?.split('_')[1] ?? 'idr'),
     ).toLowerCase();
+    const normalizedSide = normalizeOrderSide(
+      readValue(item, ['type', 'side']),
+      normalizeOrderSide(readValue(item, ['isBuyer'])) || undefined,
+    );
 
     return {
       trade_id: String(readValue(item, ['trade_id', 'id', 'tradeId']) ?? ''),
       order_id: String(orderId),
       pair: normalizedPair ?? pair ?? '',
-      type: String(readValue(item, ['type', 'side']) ?? ''),
+      type: normalizedSide,
       price: readValue(item, ['price', 'avg_price', 'average_price']) as string | number,
       [asset]: (readValue(item, [asset, 'amount', 'quantity', 'qty', 'executed_qty']) ?? 0) as
         | string
@@ -344,10 +397,17 @@ export class PrivateApi {
   async orderHistoriesV2(
     options: IndodaxHistoryQueryOptions = {},
   ): Promise<IndodaxPrivateEnvelope<IndodaxOrderHistoryReturn>> {
+    const symbol = toTradeApiV2Symbol(options.pair);
+    if (!symbol) {
+      throw new Error('pair is required for orderHistoriesV2');
+    }
+
     const payload = await this.getV2<unknown>('/api/v2/order/histories', {
-      pair: options.pair,
+      symbol,
+      startTime: options.startTime,
+      endTime: options.endTime,
       limit: options.limit,
-      order_id: options.orderId,
+      sort: options.sort,
     });
 
     const items = collectItems(payload, ['data', 'results', 'items', 'orders', 'histories']);
@@ -368,10 +428,18 @@ export class PrivateApi {
   async myTradesV2(
     options: IndodaxHistoryQueryOptions = {},
   ): Promise<IndodaxPrivateEnvelope<IndodaxTradeHistoryReturn>> {
+    const symbol = toTradeApiV2Symbol(options.pair);
+    if (!symbol) {
+      throw new Error('pair is required for myTradesV2');
+    }
+
     const payload = await this.getV2<unknown>('/api/v2/myTrades', {
-      pair: options.pair,
+      symbol,
+      startTime: options.startTime,
+      endTime: options.endTime,
       limit: options.limit,
-      order_id: options.orderId,
+      orderId: options.orderId,
+      sort: options.sort,
     });
 
     const items = collectItems(payload, ['data', 'results', 'items', 'trades']);

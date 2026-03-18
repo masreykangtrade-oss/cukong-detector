@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 
 import { IndodaxCallbackServer } from '../src/integrations/indodax/callbackServer';
@@ -79,12 +80,44 @@ async function main() {
     assert.equal(callbackFailResponse.status, 403, 'Callback server must reject host not in env allow-list');
     assert.equal(await callbackFailResponse.text(), 'fail', 'Rejected callback must reply fail');
 
+    const spoofedForwardedHostResult = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const request = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: callbackServer.getPort(),
+          path: process.env.INDODAX_CALLBACK_PATH,
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            host: process.env.INDODAX_CALLBACK_ALLOWED_HOST ?? '',
+            'x-forwarded-host': 'evil.example.com',
+          },
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          response.on('end', () => {
+            resolve({
+              statusCode: response.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString('utf8'),
+            });
+          });
+        },
+      );
+
+      request.on('error', reject);
+      request.write(JSON.stringify({ event: 'withdraw_update', status: 'ok', trace: 'spoof-check' }));
+      request.end();
+    });
+    assert.equal(spoofedForwardedHostResult.statusCode, 200, 'Direct allowed host must win over spoofed forwarded host');
+    assert.equal(spoofedForwardedHostResult.body, 'ok', 'Spoofed forwarded host must not force rejection when direct host is allowed');
+
     const callbackEvents = await persistence.readIndodaxCallbackEvents();
     const callbackState = await persistence.readIndodaxCallbackState();
 
-    assert.equal(callbackEvents.length, 2, 'Callback events must be persisted to JSONL');
+    assert.equal(callbackEvents.length, 3, 'Callback events must be persisted to JSONL');
     assert.equal(callbackEvents[0]?.path, process.env.INDODAX_CALLBACK_PATH, 'Callback event path must come from env');
-    assert.equal(callbackState.acceptedCount, 1, 'Accepted callbacks must be counted in persisted state');
+    assert.equal(callbackState.acceptedCount, 2, 'Accepted callbacks must be counted in persisted state');
     assert.equal(callbackState.rejectedCount, 1, 'Rejected callbacks must be counted in persisted state');
     assert.ok(callbackState.lastReceivedAt, 'Callback state must persist last received timestamp');
 

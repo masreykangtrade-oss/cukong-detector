@@ -25,6 +25,11 @@ function stripPort(host: string): string {
   return hostname ?? host;
 }
 
+function isLoopbackHost(host: string): boolean {
+  const normalized = stripPort(normalizeHost(host));
+  return ['127.0.0.1', 'localhost', '::1', '0.0.0.0', ''].includes(normalized);
+}
+
 function firstHeaderValue(header?: string | string[]): string {
   if (Array.isArray(header)) {
     return header[0] ?? '';
@@ -33,9 +38,14 @@ function firstHeaderValue(header?: string | string[]): string {
 }
 
 function extractHost(request: IncomingMessage): string {
-  return normalizeHost(
-    firstHeaderValue(request.headers['x-forwarded-host']) || firstHeaderValue(request.headers.host),
-  );
+  const directHost = normalizeHost(firstHeaderValue(request.headers.host));
+  const forwardedHost = normalizeHost(firstHeaderValue(request.headers['x-forwarded-host']));
+
+  if (directHost && !isLoopbackHost(directHost)) {
+    return directHost;
+  }
+
+  return forwardedHost || directHost;
 }
 
 function headersToRecord(headers: IncomingMessage['headers']): Record<string, string> {

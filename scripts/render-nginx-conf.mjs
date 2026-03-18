@@ -45,6 +45,7 @@ function buildCallbackBlock({ enabled, callbackPath, callbackUpstream }) {
     `    proxy_pass http://${callbackUpstream}${callbackPath};`,
     '    proxy_http_version 1.1;',
     '    proxy_set_header Host $host;',
+    '    proxy_set_header X-Forwarded-Host $host;',
     '    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;',
     '    proxy_set_header X-Forwarded-Proto $scheme;',
     '    proxy_set_header Upgrade $http_upgrade;',
@@ -56,9 +57,9 @@ function buildCallbackBlock({ enabled, callbackPath, callbackUpstream }) {
 async function main() {
   const publicBaseUrl = readRequired('PUBLIC_BASE_URL');
   const appBindHost = normalizeProxyHost(readOptional('APP_BIND_HOST', '0.0.0.0'));
-  const appPort = readOptional('APP_PORT', '8787');
+  const appPort = readOptional('APP_PORT', '3000');
   const callbackBindHost = normalizeProxyHost(readOptional('INDODAX_CALLBACK_BIND_HOST', '0.0.0.0'));
-  const callbackPort = readOptional('INDODAX_CALLBACK_PORT', '8788');
+  const callbackPort = readOptional('INDODAX_CALLBACK_PORT', '3001');
   const callbackPath = normalizePath(readOptional('INDODAX_CALLBACK_PATH', '/indodax/callback'), '/indodax/callback');
   const enableCallbackServer = ['1', 'true', 'yes', 'on'].includes(
     readOptional('INDODAX_ENABLE_CALLBACK_SERVER', 'false').toLowerCase(),

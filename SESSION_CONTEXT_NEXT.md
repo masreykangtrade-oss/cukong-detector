@@ -2,23 +2,18 @@
 
 Repository aktif: `https://github.com/bcbcrey-hue/cukong-markets`
 
-Gunakan file ini sebagai konteks cepat yang **sinkron penuh** dengan `REFACTOR_LOG.md`.
+Gunakan file ini sebagai konteks cepat yang sinkron penuh dengan `REFACTOR_LOG.md`.
 
 ---
 
 ## 1. Posisi project yang harus dianggap benar
 
-Status aktual repo:
-
-- refactor backend **sudah terimplementasi**, bukan draft
-- `yarn lint` lulus
-- `yarn build` lulus
-- probe runtime, Telegram, history v2, callback server, dan nginx renderer lulus
-- `tests/app_lifecycle_servers_probe.ts` juga lulus
-- runtime utama tetap:
-  `tickers + depth -> MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
-- worker runtime untuk `feature`, `pattern`, dan `backtest` sudah ada
-- dokumen `README.md`, `.env.example`, `REFACTOR_LOG.md`, dan file ini sudah sinkron
+- target domain final repo: `https://kangtrade.top`
+- target callback final repo: `https://kangtrade.top/indodax/callback`
+- contract env non-secret sekarang sinkron di `.env.example`
+- implementasi v2 Indodax sudah dipindah ke contract resmi `https://tapi.indodax.com`
+- callback server sudah di-hardening terhadap spoof `X-Forwarded-Host`
+- `README.md`, `.env.example`, `REFACTOR_LOG.md`, dan file ini sekarang sinkron
 
 ---
 
@@ -26,52 +21,44 @@ Status aktual repo:
 
 ### Trading / execution / history
 
-- live buy / sell / cancel baseline tetap ada
-- order live menyimpan `exchangeOrderId` dan disinkronkan lewat `openOrders()` lalu fallback ke `getOrder()` dan history layer
-- mode history sekarang:
-  - `v2_prefer`
-  - `v2_only`
-  - `legacy`
-- default repo sekarang `v2_prefer`
-- method v2 yang sudah ada di integrasi Indodax:
+- mode history tetap `v2_prefer | v2_only | legacy`
+- default repo tetap `v2_prefer`
+- method v2 yang dipakai sekarang:
   - `GET /api/v2/order/histories`
   - `GET /api/v2/myTrades`
-- response v2 dipetakan ke model internal legacy-compatible supaya recovery/fill accounting tidak perlu dibongkar besar
-- `SettingsService` tetap memigrasikan slippage legacy `25/80` ke `60/150`
+- contract v2 yang benar sekarang:
+  - base `https://tapi.indodax.com`
+  - header `X-APIKEY`
+  - signature query string
+  - query memakai `symbol`, `timestamp`, `recvWindow`
+- response v2 tetap dipetakan ke model internal legacy-compatible
 
 ### Callback / HTTP / deployment helpers
 
-- app utama sekarang punya HTTP server ringan dengan `/healthz`
-- callback server Indodax sekarang modul terpisah, env-driven, dan bisa hidup di port berbeda
-- callback path dibaca dari env (`INDODAX_CALLBACK_PATH`)
-- callback host allow-list dibaca dari env (`INDODAX_CALLBACK_ALLOWED_HOST`)
-- callback event dipersist ke:
-  - `data/history/indodax-callback-events.jsonl`
-  - `data/state/indodax-callback-state.json`
-- renderer nginx aktif di `scripts/render-nginx-conf.mjs`
-- template nginx aktif di `deploy/nginx/mafiamarkets.nginx.conf.template`
-- lifecycle `createApp().start()/stop()` sudah diverifikasi ikut menyalakan dan mematikan app server + callback server
-- target operasional saat ganti domain/VPS sekarang: cukup ubah `.env`, lalu render ulang config nginx
+- app utama punya `/healthz`
+- callback server hidup terpisah di port sendiri
+- callback path tetap dari env (`INDODAX_CALLBACK_PATH`)
+- host allow-list tetap dari env (`INDODAX_CALLBACK_ALLOWED_HOST`)
+- callback event tetap dipersist ke JSONL + state snapshot
+- nginx renderer aktif di `scripts/render-nginx-conf.mjs`
+- nginx template aktif di `deploy/nginx/mafiamarkets.nginx.conf.template`
+- nginx sekarang meneruskan `Host` dan `X-Forwarded-Host`
 
 ### Telegram
 
-- Telegram button UI tetap UI utama
-- main menu flat lama tetap sudah diganti 7 kategori hierarkis
-- callback navigasi `NAV` tetap terpisah dari callback aksi live
-- `Buy Slippage X bps` tetap berada di submenu `Positions / Orders / Manual Trade`
+- Telegram UI tetap UI utama
+- whitelist tetap strict berbasis `TELEGRAM_ALLOWED_USER_IDS`
+- token sempat tervalidasi read-only via `getMe`
+- webhook saat audit terakhir tidak terpasang
 
 ---
 
 ## 3. Hal yang sudah ditutup, jangan diulang
 
-- compile blocker TypeScript/support files
-- mismatch contract app ↔ persistence ↔ state ↔ hotlist ↔ report ↔ Telegram ↔ execution
-- dashboard Telegram flat lama
-- callback reachability + tombol `Kembali`
-- migrasi slippage Telegram `60/150`
-- history mode env-driven `v2_prefer | v2_only | legacy`
-- callback server env-driven + `/healthz`
-- nginx template + renderer env-driven
+- mismatch doc/env target lama (`8787/8788`, `bot.example.com`, `/hooks/indodax`)
+- implementasi v2 yang masih memakai base/header/signature lama
+- callback host extraction yang terlalu percaya `X-Forwarded-Host`
+- ketiadaan `.env.example`
 
 ---
 
@@ -79,44 +66,32 @@ Status aktual repo:
 
 ### P0
 
-- validasi live vendor untuk endpoint v2 Indodax
-- validasi callback delivery live dari Indodax ke domain publik nyata
-- fallback accounting saat detail trade exchange tidak tersedia penuh
-- recovery restart untuk skenario partial fill / cancel / close yang lebih lengkap
+- buktikan domain `kangtrade.top` benar-benar memakai hasil render nginx terbaru
+- buktikan `/healthz` publik mengarah ke runtime repo ini, bukan frontend HTML
+- buktikan callback publik live benar-benar masuk ke callback server repo ini
+- re-run validasi live read-only v2 setelah runtime/domain sinkron
 
 ### P1
 
-- pindahkan pattern matching live path ke worker runtime jika perlu offload konsisten
-- upgrade trade-flow bila ada sumber trade print native
-- pecah `executionEngine.ts` menjadi modul lebih kecil setelah P0 aman
+- dalami recovery edge-case order live parsial/terminal
+- perkuat fallback accounting jika detail fee/fill exchange parsial
 
 ### P2
 
-- verifikasi end-to-end Telegram live delivery saat validasi live diizinkan
-- tambah runbook backup/restore folder `data/`
+- tambah runbook backup/restore `data/`
 
 ---
 
-## 5. Next target paling logis
+## 5. Rule kerja sesi berikutnya
 
-1. validasi live vendor untuk history v2 dan callback publik
-2. hardening edge-case recovery restart order live
-3. fallback accounting untuk detail fee/executed trade yang parsial
-4. baru setelah itu refactor modular `executionEngine.ts`
-
----
-
-## 6. Rule kerja sesi berikutnya
-
-- jangan mengulang batch lama yang sudah selesai
-- jangan campur status lama dengan status implementasi terbaru
-- jika ada mismatch baru, utamakan implementasi aktual repo + blueprint
-- jangan overclaim live execution/history/callback sudah terbukti penuh bila live end-to-end belum dijalankan
-- gunakan `REFACTOR_LOG.md` sebagai sumber detail dan file ini sebagai ringkasan cepat
+- jangan overclaim live penuh sebelum domain publik sinkron
+- pakai implementasi repo terbaru sebagai sumber utama, bukan asumsi lama
+- jika audit domain masih menunjukkan HTML di `/healthz`, anggap deploy publik belum sinkron
+- gunakan `REFACTOR_LOG.md` untuk detail lengkap dan file ini untuk ringkasan cepat
 
 ---
 
-## 7. Validasi cepat yang bisa dipakai ulang
+## 6. Validasi cepat yang bisa dipakai ulang
 
 - `yarn lint`
 - `yarn build`

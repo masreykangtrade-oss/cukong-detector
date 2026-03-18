@@ -1,0 +1,56 @@
+{
+  "summary": "Backend-only live-readiness audit rerun completed. Local regression probes for Indodax v2 contract/mapping, callback host hardening, nginx renderer, and app lifecycle all passed; public domain behavior is still not synced with repo runtime contract.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "https://kangtrade.top/healthz",
+        "issue": "Returns HTML frontend page (content-type text/html) instead of repo runtime health JSON, indicating public routing/deploy mismatch.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "https://kangtrade.top/indodax/callback",
+        "issue": "Public callback behavior does not match repo callback server contract (GET returns custom Express text body; POST returns 200 fail), so live ingress/runtime is unsynced.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Public domain health and callback ingress",
+        "issue": "Domain appears to route to different runtime than audited repo despite local probes passing.",
+        "affected_selectors": []
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/private_api_v2_mapping_probe.ts",
+    "/app/tests/http_servers_probe.ts",
+    "/app/tests/nginx_renderer_probe.ts",
+    "/app/tests/app_lifecycle_servers_probe.ts"
+  ],
+  "action_items": [
+    "Sync live nginx/runtime on kangtrade.top with current repo render output so /healthz proxies to app server JSON.",
+    "Ensure public /indodax/callback is served by repo callback server path/host validation contract, not alternate Express gate response.",
+    "After deploy sync, re-run safe public smoke checks (GET /healthz, GET+POST /indodax/callback) and read-only Indodax v2 checks."
+  ],
+  "critical_code_review_comments": [
+    "env.ts still relies on multiple silent defaults (ports/URLs/paths). For strict live-readiness, key deployment routing vars should fail-fast when missing in production profiles.",
+    "executionEngine.ts remains very large (>1500 LOC), increasing regression risk for future P0 infra/contract changes."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_10.json"
+  ],
+  "success_rate": {
+    "backend": "80%",
+    "frontend": "N/A (skipped by request)"
+  },
+  "seed_data_creation": "No persistent seed data; isolated /tmp DATA_DIR values were used for probe runs.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Local probes passed with env-isolated runs: private_api_v2_mapping_probe, http_servers_probe, nginx_renderer_probe, app_lifecycle_servers_probe. PUBLIC checks still show unsynced domain behavior: /healthz -> HTML, /indodax/callback GET -> custom 405 body, POST -> 200 fail. Several probe suites in this repo are intentionally MOCKED for exchange/telegram harness coverage.",
+  "rca of the issue": "RCA: issue is deployment/ingress mismatch, not local module regression. Reproduction: curl https://kangtrade.top/healthz returns static HTML; curl GET https://kangtrade.top/indodax/callback returns non-repo Express text; curl POST callback returns 200 fail. Mitigation: deploy nginx config rendered from scripts/render-nginx-conf.mjs with target env (kangtrade.top, /indodax/callback, ports 3000/3001), route callback path to callback server, then revalidate externally."
+}
