@@ -2,7 +2,73 @@ import { Markup } from 'telegraf';
 import type { BotSettings, HotlistEntry, PositionRecord, TradingMode } from '../../core/types';
 import { buildCallback } from './callbackRouter';
 
-export const TELEGRAM_MENU = {
+export type TelegramMenuId =
+  | 'ROOT'
+  | 'EXEC'
+  | 'EMG'
+  | 'MON'
+  | 'TRADE'
+  | 'SET'
+  | 'SET_STRAT'
+  | 'SET_RISK'
+  | 'ACC'
+  | 'ACC_PANEL'
+  | 'BKT'
+  | 'BKT_PANEL'
+  | 'STATUS'
+  | 'MW'
+  | 'HOT'
+  | 'INTEL'
+  | 'SPOOF'
+  | 'PAT'
+  | 'LOGS'
+  | 'POS_LIST'
+  | 'ORD_LIST'
+  | 'BUY_MENU'
+  | 'SELL_MENU';
+
+const telegramMenuIds: TelegramMenuId[] = [
+  'ROOT',
+  'EXEC',
+  'EMG',
+  'MON',
+  'TRADE',
+  'SET',
+  'SET_STRAT',
+  'SET_RISK',
+  'ACC',
+  'ACC_PANEL',
+  'BKT',
+  'BKT_PANEL',
+  'STATUS',
+  'MW',
+  'HOT',
+  'INTEL',
+  'SPOOF',
+  'PAT',
+  'LOGS',
+  'POS_LIST',
+  'ORD_LIST',
+  'BUY_MENU',
+  'SELL_MENU',
+];
+
+export function isTelegramMenuId(value?: string): value is TelegramMenuId {
+  return Boolean(value) && telegramMenuIds.includes(value as TelegramMenuId);
+}
+
+export const TELEGRAM_MAIN_MENU = {
+  EXECUTE: '⚡ Execute Trade',
+  EMERGENCY: '🚨 Emergency Controls',
+  MONITORING: '📡 Monitoring / Laporan',
+  TRADE: '📦 Positions / Orders / Manual Trade',
+  SETTINGS: '⚙️ Settings',
+  ACCOUNTS: '👤 Accounts',
+  BACKTEST: '🧪 Backtest',
+} as const;
+
+export const TELEGRAM_ACTION = {
+  BACK: '↩️ Kembali',
   START: '▶️ Start Bot',
   STOP: '⏹️ Stop Bot',
   STATUS: '📊 Status',
@@ -11,48 +77,91 @@ export const TELEGRAM_MENU = {
   INTELLIGENCE: '🧠 Intelligence Report',
   SPOOF: '🕳️ Spoof Radar',
   PATTERN: '🧬 Pattern Match',
-  BACKTEST: '🧪 Backtest',
+  LOGS: '📜 Logs',
   POSITIONS: '📦 Positions',
   ORDERS: '🧾 Orders',
   MANUAL_BUY: '🟢 Manual Buy',
   MANUAL_SELL: '🔴 Manual Sell',
+  BUY_SLIPPAGE: '🎯 Buy Slippage',
   STRATEGY: '⚙️ Strategy Settings',
   RISK: '🛡️ Risk Settings',
   ACCOUNTS: '👤 Accounts',
-  LOGS: '📜 Logs',
-  EMERGENCY: '🚨 Emergency Controls',
+  LIST_ACCOUNTS: '📋 List Accounts',
+  UPLOAD_JSON: '📤 Upload JSON',
+  RELOAD_ACCOUNTS: '♻️ Reload Accounts',
+  BACKTEST: '🧪 Backtest',
+  RUN_TOP: '🏁 Run Top Pair',
+  RUN_ALL: '🧪 Run All Recent',
+  LAST_RESULT: '🧾 Last Result',
+  PAUSE_AUTO: '⏸️ Pause Auto → ALERT_ONLY',
+  PAUSE_ALL: '🛑 Pause All → OFF',
+  CANCEL_ALL: '🧹 Cancel All Orders',
+  SELL_ALL: '💥 Sell All Positions',
 } as const;
 
+function openMenuCallback(menuId: TelegramMenuId): string {
+  return buildCallback({ namespace: 'NAV', action: 'OPEN', value: menuId });
+}
+
+function backMenuCallback(menuId: TelegramMenuId): string {
+  return buildCallback({ namespace: 'NAV', action: 'BACK', value: menuId });
+}
+
+function backButton(menuId: TelegramMenuId) {
+  return Markup.button.callback(TELEGRAM_ACTION.BACK, backMenuCallback(menuId));
+}
+
+function bindPositionValue(backMenu: TelegramMenuId, positionId: string): string {
+  return `${backMenu}:${positionId}`;
+}
+
 export const mainMenuKeyboard = Markup.keyboard([
-  [TELEGRAM_MENU.START, TELEGRAM_MENU.STOP, TELEGRAM_MENU.STATUS],
-  [TELEGRAM_MENU.MARKET_WATCH, TELEGRAM_MENU.HOTLIST, TELEGRAM_MENU.POSITIONS],
-  [TELEGRAM_MENU.INTELLIGENCE, TELEGRAM_MENU.SPOOF, TELEGRAM_MENU.PATTERN],
-  [TELEGRAM_MENU.ORDERS, TELEGRAM_MENU.MANUAL_BUY, TELEGRAM_MENU.MANUAL_SELL],
-  [TELEGRAM_MENU.STRATEGY, TELEGRAM_MENU.RISK, TELEGRAM_MENU.ACCOUNTS],
-  [TELEGRAM_MENU.BACKTEST, TELEGRAM_MENU.LOGS, TELEGRAM_MENU.EMERGENCY],
+  [TELEGRAM_MAIN_MENU.EXECUTE, TELEGRAM_MAIN_MENU.EMERGENCY],
+  [TELEGRAM_MAIN_MENU.MONITORING, TELEGRAM_MAIN_MENU.TRADE],
+  [TELEGRAM_MAIN_MENU.SETTINGS, TELEGRAM_MAIN_MENU.ACCOUNTS],
+  [TELEGRAM_MAIN_MENU.BACKTEST],
 ]).resize();
 
-export const emergencyKeyboard = Markup.inlineKeyboard([
-  [
-    Markup.button.callback(
-      'Pause Auto → ALERT_ONLY',
-      buildCallback({ namespace: 'EMG', action: 'MODE', value: 'ALERT_ONLY' }),
-    ),
-  ],
-  [
-    Markup.button.callback(
-      'Pause All → OFF',
-      buildCallback({ namespace: 'EMG', action: 'MODE', value: 'OFF' }),
-    ),
-  ],
-  [Markup.button.callback('Cancel All Orders', buildCallback({ namespace: 'EMG', action: 'CANCEL_ALL' }))],
-  [Markup.button.callback('Sell All Positions', buildCallback({ namespace: 'EMG', action: 'SELL_ALL' }))],
+export const executeTradeKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.START, buildCallback({ namespace: 'RUN', action: 'START' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.STOP, buildCallback({ namespace: 'RUN', action: 'STOP' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.STATUS, buildCallback({ namespace: 'RUN', action: 'STATUS' }))],
+  [backButton('ROOT')],
 ]);
 
-export const accountsKeyboard = Markup.inlineKeyboard([
-  [Markup.button.callback('List Accounts', buildCallback({ namespace: 'ACC', action: 'LIST' }))],
-  [Markup.button.callback('Upload JSON', buildCallback({ namespace: 'ACC', action: 'UPLOAD' }))],
-  [Markup.button.callback('Reload Accounts', buildCallback({ namespace: 'ACC', action: 'RELOAD' }))],
+export const emergencyKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.PAUSE_AUTO, buildCallback({ namespace: 'EMG', action: 'MODE', value: 'ALERT_ONLY' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.PAUSE_ALL, buildCallback({ namespace: 'EMG', action: 'MODE', value: 'OFF' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.CANCEL_ALL, buildCallback({ namespace: 'EMG', action: 'CANCEL_ALL' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.SELL_ALL, buildCallback({ namespace: 'EMG', action: 'SELL_ALL' }))],
+  [backButton('ROOT')],
+]);
+
+export const monitoringKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.MARKET_WATCH, openMenuCallback('MW'))],
+  [Markup.button.callback(TELEGRAM_ACTION.HOTLIST, openMenuCallback('HOT'))],
+  [Markup.button.callback(TELEGRAM_ACTION.INTELLIGENCE, openMenuCallback('INTEL'))],
+  [Markup.button.callback(TELEGRAM_ACTION.SPOOF, openMenuCallback('SPOOF'))],
+  [Markup.button.callback(TELEGRAM_ACTION.PATTERN, openMenuCallback('PAT'))],
+  [Markup.button.callback(TELEGRAM_ACTION.LOGS, openMenuCallback('LOGS'))],
+  [backButton('ROOT')],
+]);
+
+export function positionsMenuKeyboard(settings: BotSettings) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback(TELEGRAM_ACTION.POSITIONS, openMenuCallback('POS_LIST'))],
+    [Markup.button.callback(TELEGRAM_ACTION.ORDERS, openMenuCallback('ORD_LIST'))],
+    [Markup.button.callback(TELEGRAM_ACTION.MANUAL_BUY, openMenuCallback('BUY_MENU'))],
+    [Markup.button.callback(TELEGRAM_ACTION.MANUAL_SELL, openMenuCallback('SELL_MENU'))],
+    [Markup.button.callback(`${TELEGRAM_ACTION.BUY_SLIPPAGE} ${settings.strategy.buySlippageBps} bps`, buildCallback({ namespace: 'SET', action: 'BUY_SLIPPAGE' }))],
+    [backButton('ROOT')],
+  ]);
+}
+
+export const settingsKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.STRATEGY, openMenuCallback('SET_STRAT'))],
+  [Markup.button.callback(TELEGRAM_ACTION.RISK, openMenuCallback('SET_RISK'))],
+  [backButton('ROOT')],
 ]);
 
 export function tradingModeKeyboard(current: TradingMode) {
@@ -78,83 +187,95 @@ export function strategySettingsKeyboard(settings: BotSettings) {
         buildCallback({ namespace: 'SET', action: 'MODE', value: mode }),
       ),
     ]),
-    [
-      Markup.button.callback(
-        `Buy Slippage ${settings.strategy.buySlippageBps} bps`,
-        buildCallback({ namespace: 'SET', action: 'BUY_SLIPPAGE' }),
-      ),
-    ],
+    [backButton('SET')],
   ]);
 }
 
 export function riskSettingsKeyboard(settings: BotSettings) {
   return Markup.inlineKeyboard([
-    [
-      Markup.button.callback(
-        `Take Profit ${settings.risk.takeProfitPct}%`,
-        buildCallback({ namespace: 'SET', action: 'TAKE_PROFIT' }),
-      ),
-    ],
+    [Markup.button.callback(`Take Profit ${settings.risk.takeProfitPct}%`, buildCallback({ namespace: 'SET', action: 'TAKE_PROFIT' }))],
+    [backButton('SET')],
   ]);
 }
 
-export function hotlistKeyboard(hotlist: HotlistEntry[]) {
-  return Markup.inlineKeyboard(
-    hotlist.slice(0, 8).map((item) => [
+export const accountsCategoryKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.ACCOUNTS, openMenuCallback('ACC_PANEL'))],
+  [backButton('ROOT')],
+]);
+
+export const accountsKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.LIST_ACCOUNTS, buildCallback({ namespace: 'ACC', action: 'LIST' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.UPLOAD_JSON, buildCallback({ namespace: 'ACC', action: 'UPLOAD' }))],
+  [Markup.button.callback(TELEGRAM_ACTION.RELOAD_ACCOUNTS, buildCallback({ namespace: 'ACC', action: 'RELOAD' }))],
+  [backButton('ACC')],
+]);
+
+export const backtestCategoryKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback(TELEGRAM_ACTION.BACKTEST, openMenuCallback('BKT_PANEL'))],
+  [backButton('ROOT')],
+]);
+
+export function hotlistKeyboard(
+  hotlist: HotlistEntry[],
+  backMenu: TelegramMenuId = 'MON',
+) {
+  return Markup.inlineKeyboard([
+    ...hotlist.slice(0, 8).map((item) => [
       Markup.button.callback(
         `${item.rank}. ${item.pair} (${item.score.toFixed(0)})`,
-        buildCallback({ namespace: 'SIG', action: 'DETAIL', pair: item.pair }),
+        buildCallback({ namespace: 'SIG', action: 'DETAIL', value: backMenu, pair: item.pair }),
       ),
       Markup.button.callback(
         `Buy ${item.pair}`,
-        buildCallback({ namespace: 'BUY', action: 'PICK', pair: item.pair }),
+        buildCallback({ namespace: 'BUY', action: 'PICK', value: backMenu, pair: item.pair }),
       ),
     ]),
-  );
+    [backButton(backMenu)],
+  ]);
 }
 
-export function positionsKeyboard(positions: PositionRecord[]) {
-  return Markup.inlineKeyboard(
-    positions.slice(0, 10).flatMap((item) => [
+export function positionsKeyboard(
+  positions: PositionRecord[],
+  backMenu: TelegramMenuId = 'TRADE',
+) {
+  return Markup.inlineKeyboard([
+    ...positions.slice(0, 10).flatMap((item) => [
       [
         Markup.button.callback(
           `${item.pair} qty=${item.quantity.toFixed(8)}`,
-          buildCallback({ namespace: 'POS', action: 'DETAIL', value: item.id }),
+          buildCallback({ namespace: 'POS', action: 'DETAIL', value: bindPositionValue(backMenu, item.id) }),
         ),
       ],
       [
         Markup.button.callback(
           'Sell 25%',
-          buildCallback({ namespace: 'POS', action: 'SELL25', value: item.id }),
+          buildCallback({ namespace: 'POS', action: 'SELL25', value: bindPositionValue(backMenu, item.id) }),
         ),
         Markup.button.callback(
           'Sell 50%',
-          buildCallback({ namespace: 'POS', action: 'SELL50', value: item.id }),
+          buildCallback({ namespace: 'POS', action: 'SELL50', value: bindPositionValue(backMenu, item.id) }),
         ),
       ],
       [
         Markup.button.callback(
           'Sell 75%',
-          buildCallback({ namespace: 'POS', action: 'SELL75', value: item.id }),
+          buildCallback({ namespace: 'POS', action: 'SELL75', value: bindPositionValue(backMenu, item.id) }),
         ),
         Markup.button.callback(
           'Sell 100%',
-          buildCallback({ namespace: 'POS', action: 'SELL100', value: item.id }),
+          buildCallback({ namespace: 'POS', action: 'SELL100', value: bindPositionValue(backMenu, item.id) }),
         ),
       ],
     ]),
-  );
+    [backButton(backMenu)],
+  ]);
 }
 
 export function backtestKeyboard(currentPair?: string) {
   return Markup.inlineKeyboard([
-    [
-      Markup.button.callback(
-        currentPair ? `Run Top Pair (${currentPair})` : 'Run Top Pair',
-        buildCallback({ namespace: 'BKT', action: 'RUN_TOP', pair: currentPair }),
-      ),
-    ],
-    [Markup.button.callback('Run All Recent', buildCallback({ namespace: 'BKT', action: 'RUN_ALL' }))],
-    [Markup.button.callback('Last Result', buildCallback({ namespace: 'BKT', action: 'LAST' }))],
+    [Markup.button.callback(currentPair ? `${TELEGRAM_ACTION.RUN_TOP} (${currentPair})` : TELEGRAM_ACTION.RUN_TOP, buildCallback({ namespace: 'BKT', action: 'RUN_TOP', pair: currentPair }))],
+    [Markup.button.callback(TELEGRAM_ACTION.RUN_ALL, buildCallback({ namespace: 'BKT', action: 'RUN_ALL' }))],
+    [Markup.button.callback(TELEGRAM_ACTION.LAST_RESULT, buildCallback({ namespace: 'BKT', action: 'LAST' }))],
+    [backButton('BKT')],
   ]);
 }

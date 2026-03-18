@@ -239,8 +239,8 @@ export const env: EnvConfig = {
   probabilityThresholdAuto: readNumber('PROBABILITY_THRESHOLD_AUTO', 0.72),
   confidenceThresholdAuto: readNumber('CONFIDENCE_THRESHOLD_AUTO', 0.68),
   spoofRiskBlockThreshold: readNumber('SPOOF_RISK_BLOCK_THRESHOLD', 0.55),
-  buySlippageBps: readNumber('BUY_SLIPPAGE_BPS', 25),
-  maxBuySlippageBps: readNumber('MAX_BUY_SLIPPAGE_BPS', 80),
+  buySlippageBps: readNumber('BUY_SLIPPAGE_BPS', 60),
+  maxBuySlippageBps: readNumber('MAX_BUY_SLIPPAGE_BPS', 150),
   buyOrderTimeoutMs: readNumber('BUY_ORDER_TIMEOUT_MS', 8_000),
 };
 

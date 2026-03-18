@@ -1,0 +1,40 @@
+{
+  "summary": "Backend-only audit completed for Telegram menu hierarchy/callback wiring/slippage migration plus runtime probes. lint/build passed; runtime_backend_regression, worker_timeout_probe, live_execution_hardening_probe, execution_summary_failed_probe, telegram_menu_navigation_probe, and added telegram_slippage_confirmation_probe all passed. Exchange and Telegram transport in probes are MOCKED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/runtime_backend_regression.ts",
+    "/app/tests/worker_timeout_probe.ts",
+    "/app/tests/live_execution_hardening_probe.ts",
+    "/app/tests/execution_summary_failed_probe.ts",
+    "/app/tests/telegram_menu_navigation_probe.ts",
+    "/app/tests/telegram_slippage_confirmation_probe.ts"
+  ],
+  "action_items": [
+    "Keep telegram_slippage_confirmation_probe.ts in CI to guard warning+confirmation flow when input exceeds 150 bps.",
+    "Keep telegram_menu_navigation_probe.ts as regression gate for callback reachability and 7-category structure."
+  ],
+  "critical_code_review_comments": [
+    "executionEngine.ts is still very large (>700 lines), mixing submit/reconcile/summary concerns; split modules to reduce regression blast radius."
+  ],
+  "updated_files": [
+    "/app/tests/telegram_slippage_confirmation_probe.ts",
+    "/app/test_reports/iteration_8.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (skipped by request)"
+  },
+  "seed_data_creation": "No persistent seed data. Isolated DATA_DIR under /tmp used per probe run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed and passed: yarn lint && yarn build; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-reg LOG_DIR=/tmp/mafiamarkets-it8-reg/logs TEMP_DIR=/tmp/mafiamarkets-it8-reg/tmp yarn tsx /app/tests/runtime_backend_regression.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-timeout LOG_DIR=/tmp/mafiamarkets-it8-timeout/logs TEMP_DIR=/tmp/mafiamarkets-it8-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-live LOG_DIR=/tmp/mafiamarkets-it8-live/logs TEMP_DIR=/tmp/mafiamarkets-it8-live/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-failed LOG_DIR=/tmp/mafiamarkets-it8-failed/logs TEMP_DIR=/tmp/mafiamarkets-it8-failed/tmp yarn tsx /app/tests/execution_summary_failed_probe.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-menu LOG_DIR=/tmp/mafiamarkets-it8-menu/logs TEMP_DIR=/tmp/mafiamarkets-it8-menu/tmp yarn tsx /app/tests/telegram_menu_navigation_probe.ts; TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-slip LOG_DIR=/tmp/mafiamarkets-it8-slip/logs TEMP_DIR=/tmp/mafiamarkets-it8-slip/tmp yarn tsx /app/tests/telegram_slippage_confirmation_probe.ts. MOCKED integrations: FakeLiveIndodaxClient/FakeLiveOrderApi/FakeIndodaxClient and fake Telegram bot context harness.",
+  "rca of the issue": "No blocking bug reproduced in this run. RCA focus points validated: NAV namespace callbacks parse and route without conflict, each tested submenu callback is supported by handler switch, buy slippage default/legacy migration normalizes 25->60 and 80->150, and >150 input triggers warning then safe cap confirmation path (LANJUT => set 150, alternate numeric input => apply alternate value)."
+}

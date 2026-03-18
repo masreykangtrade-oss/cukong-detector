@@ -12,13 +12,75 @@ import {
   createDefaultSettings,
 } from '../../services/persistenceService';
 
+const LEGACY_DEFAULT_BUY_SLIPPAGE_BPS = 25;
+const LEGACY_MAX_BUY_SLIPPAGE_BPS = 80;
+
 export class SettingsService {
   private settings: BotSettings = createDefaultSettings();
 
   constructor(private readonly persistence: PersistenceService) {}
 
+  private normalize(input: BotSettings): BotSettings {
+    const defaults = createDefaultSettings();
+
+    const next: BotSettings = {
+      ...defaults,
+      ...input,
+      risk: {
+        ...defaults.risk,
+        ...input.risk,
+      },
+      strategy: {
+        ...defaults.strategy,
+        ...input.strategy,
+      },
+      scanner: {
+        ...defaults.scanner,
+        ...input.scanner,
+      },
+      workers: {
+        ...defaults.workers,
+        ...input.workers,
+      },
+      backtest: {
+        ...defaults.backtest,
+        ...input.backtest,
+      },
+    };
+
+    next.strategy.maxBuySlippageBps = defaults.strategy.maxBuySlippageBps;
+
+    if (
+      input.strategy?.buySlippageBps === undefined ||
+      input.strategy.buySlippageBps === LEGACY_DEFAULT_BUY_SLIPPAGE_BPS
+    ) {
+      next.strategy.buySlippageBps = defaults.strategy.buySlippageBps;
+    }
+
+    if (
+      input.strategy?.maxBuySlippageBps === undefined ||
+      input.strategy.maxBuySlippageBps === LEGACY_MAX_BUY_SLIPPAGE_BPS
+    ) {
+      next.strategy.maxBuySlippageBps = defaults.strategy.maxBuySlippageBps;
+    }
+
+    next.strategy.buySlippageBps = Math.max(
+      0,
+      Math.min(next.strategy.buySlippageBps, next.strategy.maxBuySlippageBps),
+    );
+
+    return next;
+  }
+
   async load(): Promise<BotSettings> {
-    this.settings = await this.persistence.readSettings();
+    const loaded = await this.persistence.readSettings();
+    const normalized = this.normalize(loaded);
+    this.settings = normalized;
+
+    if (JSON.stringify(loaded) !== JSON.stringify(normalized)) {
+      await this.persistence.saveSettings(normalized);
+    }
+
     return this.settings;
   }
 
@@ -27,10 +89,10 @@ export class SettingsService {
   }
 
   async replace(next: BotSettings): Promise<BotSettings> {
-    this.settings = {
+    this.settings = this.normalize({
       ...next,
       updatedAt: new Date().toISOString(),
-    };
+    });
     await this.persistence.saveSettings(this.settings);
     return this.settings;
   }

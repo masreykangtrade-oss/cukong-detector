@@ -1,5 +1,6 @@
 export type TelegramNamespace =
   | 'NAV'
+  | 'RUN'
   | 'ACC'
   | 'SET'
   | 'SIG'
@@ -39,6 +40,7 @@ export function parseCallback(raw: string): TelegramCallbackPayload | null {
 
   const allowedNamespaces: TelegramNamespace[] = [
     'NAV',
+    'RUN',
     'ACC',
     'SET',
     'SIG',
