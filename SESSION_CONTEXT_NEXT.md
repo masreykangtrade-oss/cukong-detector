@@ -18,6 +18,13 @@ Branding/package naming final yang sekarang berlaku: `cukong-markets`.
   - `/healthz`
   - `/indodax/callback`
 - `INDODAX_CALLBACK_PATH` tetap ada di env contract, tetapi sekarang divalidasi agar tidak mengubah route internal inti
+- runtime publik aktif `kangtrade.top` masih belum terbukti sama dengan runtime repo ini
+
+## 1A. Status komponen blueprint besar
+
+- implemented & connected di repo: intelligence, microstructure, history, workers, backtest, execution summary/trade outcome summary, Telegram operational UI, callback server, nginx renderer
+- belum terbukti di runtime publik aktif: wiring `/healthz` dan `/indodax/callback`
+- masih parsial: compatibility layer legacy `/tapi` + V2 pada execution/recovery
 
 ---
 
