@@ -4,71 +4,95 @@ Backend TypeScript untuk bot operasional market Indodax dengan UI utama di Teleg
 
 Package/app naming final yang dipakai sekarang: `cukong-markets`.
 
-## Prinsip arsitektur config repo ini
+## Status jujur repo saat ini
 
-- domain publik dibentuk dari env `PUBLIC_BASE_URL`
-- callback final selalu dibentuk dari env `PUBLIC_BASE_URL + INDODAX_CALLBACK_PATH`
-- route internal inti tetap statis:
+### Sudah implemented & connected di repo
+
+- `MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
+- domain `intelligence`, `microstructure`, `history`, `backtest`, dan `workers`
+- hardening execution nyata: `openOrders`-first sync, fallback `getOrder`, fallback history, duplicate BUY/SELL guard, stale BUY timeout cancel
+- execution summary + trade outcome summary ke persistence + journal + Telegram notifier
+- callback server Indodax terpisah port, env-driven, dan persist event/state
+- Telegram operational UI 7 kategori, whitelist ketat, legacy upload account JSON, storage akun tetap di `data/accounts/accounts.json`
+- history mode `v2_prefer | v2_only | legacy` benar-benar dipakai di execution/recovery
+- nginx template + renderer berbasis env
+
+### Masih parsial
+
+- jalur execution/recovery masih sengaja memegang compatibility layer legacy `/tapi` + Trade API 2.0 untuk recovery dan fallback; ini **parsial**, bukan final murni V2
+
+### Tidak boleh dioverclaim
+
+- runtime publik `https://kangtrade.top` **bukan bukti** bahwa repo ini sudah live sesuai source saat ini
+- verifikasi publik terbaru menunjukkan:
+  - `https://kangtrade.top/healthz` merespons HTML login page, bukan JSON health server repo ini
+  - `https://kangtrade.top/indodax/callback` merespons text gate `405`, bukan respons callback server repo ini
+- artinya ingress/domain publik aktif saat ini belum terbukti mengarah ke runtime repo ini
+
+## Kontrak arsitektur yang benar
+
+- domain publik dibentuk dari `PUBLIC_BASE_URL`
+- callback publik final dibentuk dari `PUBLIC_BASE_URL + INDODAX_CALLBACK_PATH`
+- route internal inti sengaja stabil:
   - app health: `/healthz`
   - callback listener: `/indodax/callback`
-- nginx hanya bertugas sebagai wiring/proxy
-- Telegram tetap panel/UI utama via long polling; tidak wajib webhook
-- vendor API Indodax dipisahkan dari config domain publik
+- vendor outbound dipisahkan dari domain publik:
+  - `INDODAX_PUBLIC_BASE_URL`
+  - `INDODAX_PRIVATE_BASE_URL`
+  - `INDODAX_TRADE_API_V2_BASE_URL`
+- nginx hanya wiring/proxy
+- Telegram tetap UI/panel utama via long polling
 
-Contoh runtime saat ini:
+Contoh contract target saat ini:
 
-- `PUBLIC_BASE_URL=https://kangtrade.top`
-- `INDODAX_CALLBACK_PATH=/indodax/callback`
-- hasil final: `https://kangtrade.top/indodax/callback`
+```bash
+PUBLIC_BASE_URL=https://kangtrade.top
+INDODAX_CALLBACK_PATH=/indodax/callback
+```
 
-## Arsitektur aktif
+Hasil final callback URL:
 
-Runtime utama repo tetap:
-
-`tickers + depth -> MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
-
-Komponen yang sudah terhubung:
-
-- scanner market + hotlist berbasis `OpportunityAssessment`
-- pipeline intelligence + worker runtime + backtest
-- hardening execution (openOrders-first, getOrder, history fallback, duplicate guard)
-- summary execution/trade ke Telegram + journal + persistence
-- mode history Indodax `v2_prefer | v2_only | legacy`
-- callback server Indodax terpisah port, env-driven, dan persist event
-- nginx template + renderer berbasis `.env`
-
-## Status komponen blueprint besar
-
-Sudah terimplementasi dan terhubung di repo:
-
-- `MarketWatcher`, `SignalEngine`, `OpportunityAssessment`, `ExecutionEngine`
-- layer `intelligence`, `microstructure`, `history`, `backtest`, dan `workers`
-- execution summary + trade outcome summary
-- Telegram UI operasional, whitelist, accounts, settings, backtest hooks
-- callback server + nginx renderer + env-driven config contract
-
-Sudah ada di repo tetapi belum terbukti dari runtime publik aktif:
-
-- ingress publik yang benar-benar mengarahkan `/healthz` ke app server repo
-- ingress publik yang benar-benar mengarahkan `/indodax/callback` ke callback server repo
-
-Masih parsial / masih membawa compatibility layer:
-
-- jalur execution/recovery masih memegang legacy `/tapi` dan Trade API 2.0 sekaligus untuk alasan compatibility/recovery
+```bash
+https://kangtrade.top/indodax/callback
+```
 
 ## Telegram UI operasional
 
-Main menu operasional berisi 7 kategori:
+Menu utama operasional memang terdiri dari 7 kategori:
 
 1. `⚡ Execute Trade`
 2. `🚨 Emergency Controls`
-3. `📡 Monitoring / Laporan`
-4. `📦 Positions / Orders / Manual Trade`
+3. `📡 Monitoring`
+4. `📦 Positions`
 5. `⚙️ Settings`
 6. `👤 Accounts`
 7. `🧪 Backtest`
 
-Whitelist akses tetap ketat lewat `TELEGRAM_ALLOWED_USER_IDS`.
+Submenu saat ini sudah memecah flow utama menjadi:
+
+- monitoring / laporan / intelligence / spoof / pattern / logs
+- positions / orders / manual buy / manual sell
+- strategy settings / risk settings
+- accounts list / upload / reload
+- backtest run top / run all / last result
+
+Whitelist Telegram tetap ketat lewat `TELEGRAM_ALLOWED_USER_IDS`.
+
+## Storage dan persistence yang dipakai nyata
+
+- akun: `data/accounts/accounts.json`
+- meta akun: `data/accounts/accounts-meta.json`
+- runtime state: `data/state/runtime-state.json`
+- orders: `data/state/orders.json`
+- positions: `data/state/positions.json`
+- trades: `data/state/trades.json`
+- callback events: `data/history/indodax-callback-events.jsonl`
+- pair history: `data/history/pair-history.jsonl`
+- anomaly events: `data/history/anomaly-events.jsonl`
+- pattern outcomes: `data/history/pattern-outcomes.jsonl`
+- execution summaries: `data/history/execution-summaries.jsonl`
+- trade outcomes: `data/history/trade-outcomes.jsonl`
+- backtest results: `data/backtest/*.json`
 
 ## Env contract
 
@@ -77,6 +101,8 @@ Salin `.env.example` menjadi `.env`, lalu isi minimal:
 - `PUBLIC_BASE_URL`
 - `APP_PORT`
 - `APP_BIND_HOST`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_ALLOWED_USER_IDS`
 - `INDODAX_CALLBACK_PATH`
 - `INDODAX_CALLBACK_PORT`
 - `INDODAX_CALLBACK_BIND_HOST`
@@ -86,50 +112,25 @@ Salin `.env.example` menjadi `.env`, lalu isi minimal:
 - `INDODAX_PUBLIC_BASE_URL`
 - `INDODAX_PRIVATE_BASE_URL`
 - `INDODAX_TRADE_API_V2_BASE_URL`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_ALLOWED_USER_IDS`
 - `DATA_DIR`
 - `LOG_DIR`
 - `TEMP_DIR`
 
-Default contoh non-secret yang sekarang sinkron:
+`.env.example` sekarang sudah sinkron dengan variabel yang benar-benar dipakai source. Path-path turunan seperti file accounts/state/history **tidak** diisi manual di env karena memang dibentuk oleh code dari `DATA_DIR`.
+
+## Instalasi dan menjalankan lokal
 
 ```bash
-PUBLIC_BASE_URL=https://kangtrade.top
-APP_PORT=3000
-APP_BIND_HOST=0.0.0.0
-INDODAX_CALLBACK_PATH=/indodax/callback
-INDODAX_CALLBACK_PORT=3001
-INDODAX_CALLBACK_BIND_HOST=0.0.0.0
-INDODAX_CALLBACK_ALLOWED_HOST=kangtrade.top
-INDODAX_ENABLE_CALLBACK_SERVER=true
-INDODAX_HISTORY_MODE=v2_prefer
-INDODAX_PUBLIC_BASE_URL=https://indodax.com/api
-INDODAX_PRIVATE_BASE_URL=https://indodax.com/tapi
-INDODAX_TRADE_API_V2_BASE_URL=https://tapi.indodax.com
+yarn install
+cp .env.example .env
+yarn lint
+yarn build
+yarn dev
 ```
 
-## Callback URL final
+Jika `INDODAX_ENABLE_CALLBACK_SERVER=true`, callback server ikut start saat app dijalankan.
 
-Callback URL publik selalu diturunkan dari:
-
-`PUBLIC_BASE_URL + INDODAX_CALLBACK_PATH`
-
-Dengan contract target saat ini, hasil finalnya wajib menjadi:
-
-`https://kangtrade.top/indodax/callback`
-
-`INDODAX_CALLBACK_PATH` tetap dipakai sebagai source of truth pembentuk URL final, tetapi route internal repo ini sengaja dijaga tetap `/indodax/callback` agar wiring tidak berubah-ubah.
-
-## Batas concern yang harus tetap dipisah
-
-- `PUBLIC_BASE_URL` + `INDODAX_CALLBACK_PATH` = callback publik final
-- `/indodax/callback` = internal listener route yang stabil
-- `INDODAX_PUBLIC_BASE_URL`, `INDODAX_PRIVATE_BASE_URL`, `INDODAX_TRADE_API_V2_BASE_URL` = vendor API outbound
-- Telegram = UI/panel utama user via long polling
-- nginx = wiring dari domain publik ke app/callback internal
-
-## Cara render nginx config
+## Render nginx
 
 Setelah `.env` siap, jalankan:
 
@@ -137,24 +138,22 @@ Setelah `.env` siap, jalankan:
 yarn render:nginx
 ```
 
-Output final berada di:
+Output final:
 
 ```bash
 deploy/nginx/mafiamarkets.nginx.conf
 ```
 
-Nama file artefak nginx itu masih dipertahankan untuk compatibility operasional; source of truth config-nya tetap env + template renderer.
-
-Template nginx sekarang meneruskan:
+Template nginx saat ini memang meneruskan header berikut:
 
 - `Host`
 - `X-Forwarded-Host`
 - `X-Forwarded-For`
 - `X-Forwarded-Proto`
 
-## Cara cek runtime lokal
+## Verifikasi lokal cepat
 
-Health app utama:
+Health app:
 
 ```bash
 curl http://127.0.0.1:${APP_PORT}/healthz
@@ -166,23 +165,29 @@ Health callback:
 curl http://127.0.0.1:${INDODAX_CALLBACK_PORT}/healthz
 ```
 
-## Cara menjalankan
+## Test / probe yang benar-benar tersedia
 
-```bash
-yarn install
-yarn lint
-yarn build
-yarn dev
-```
-
-Jika `INDODAX_ENABLE_CALLBACK_SERVER=true`, callback server ikut start saat app dijalankan.
-
-## Probe / regression penting
-
-Probe yang harus lulus:
+`package.json` saat ini hanya menyediakan script:
 
 - `yarn lint`
 - `yarn build`
+- `yarn dev`
+- `yarn start`
+- `yarn render:nginx`
+
+Probe repo memang tersedia, tetapi dijalankan langsung via `tsx`, bukan lewat script package khusus.
+
+Contoh pola run probe:
+
+```bash
+set -a
+source .env
+set +a
+DATA_DIR=/tmp/cukong-probe ./node_modules/.bin/tsx tests/http_servers_probe.ts
+```
+
+Daftar probe penting yang tersedia nyata:
+
 - `tests/runtime_backend_regression.ts`
 - `tests/worker_timeout_probe.ts`
 - `tests/live_execution_hardening_probe.ts`
@@ -195,12 +200,25 @@ Probe yang harus lulus:
 - `tests/nginx_renderer_probe.ts`
 - `tests/app_lifecycle_servers_probe.ts`
 
+## Deploy / ingress checklist
+
+1. Isi `.env` production yang benar
+2. Jalankan `yarn build`
+3. Jalankan `yarn render:nginx`
+4. Terapkan `deploy/nginx/mafiamarkets.nginx.conf` ke server ingress yang benar
+5. Pastikan `/healthz` menuju app server dan `/indodax/callback` menuju callback server
+6. Verifikasi publik:
+
+```bash
+curl -i https://your-domain/healthz
+curl -i https://your-domain/indodax/callback
+```
+
+Jika `/healthz` masih mengembalikan HTML page atau `/indodax/callback` masih mengembalikan respons gate/non-repo, maka ingress publik belum memakai wiring repo ini.
+
 ## Catatan jujur
 
-- validasi read-only Telegram dan legacy `getInfo` vendor bisa dilakukan aman
-- Trade API v2 Indodax memakai base resmi `https://tapi.indodax.com`, header `X-APIKEY`, dan query signature
-- callback server lokal sudah memprioritaskan host langsung agar spoof `X-Forwarded-Host` tidak mengalahkan host publik valid
-- live domain publik tetap harus benar-benar memakai nginx hasil render terbaru agar `/healthz` dan callback target sesuai repo ini
-- penutupan blocker runtime publik aktif membutuhkan akses deploy/runtime yang tidak tersedia dari repo saja bila custom domain/ingress aktif berada di luar environment ini
-
-Lihat `REFACTOR_LOG.md` untuk audit lengkap dan `SESSION_CONTEXT_NEXT.md` untuk konteks sesi berikutnya.
+- repo internal saat ini sudah sinkron dan tervalidasi lewat lint, build, dan seluruh probe utama
+- repo ini **siap dipakai sebagai source of truth internal**, tetapi **belum boleh diklaim live publik** selama ingress/domain aktif belum benar-benar diarahkan ke runtime repo ini
+- untuk audit teknis final dan status komponen blueprint, lihat `REFACTOR_LOG.md`
+- untuk ringkasan sesi berikutnya, lihat `SESSION_CONTEXT_NEXT.md`

@@ -2,113 +2,81 @@
 
 Repository aktif: `https://github.com/bcbcrey-hue/cukong-markets`
 
-Gunakan file ini sebagai ringkasan cepat yang sinkron penuh dengan `REFACTOR_LOG.md`, `README.md`, `.env.example`, dan `package.json`.
+Branding/package naming final: `cukong-markets`.
 
-Branding/package naming final yang sekarang berlaku: `cukong-markets`.
+Gunakan file ini sebagai ringkasan cepat yang sinkron dengan `REFACTOR_LOG.md`, `README.md`, `.env.example`, dan `package.json`.
 
 ---
 
 ## 1. Posisi project yang harus dianggap benar
 
-- desain repo sekarang **hampir env-driven** dan sudah jauh lebih rapi
-- package/app naming utama sudah diseragamkan ke `cukong-markets`
-- source of truth domain publik ada di `PUBLIC_BASE_URL`
-- callback final dibentuk dari `PUBLIC_BASE_URL + INDODAX_CALLBACK_PATH`
-- route internal inti tetap stabil:
-  - `/healthz`
-  - `/indodax/callback`
-- `INDODAX_CALLBACK_PATH` tetap ada di env contract, tetapi sekarang divalidasi agar tidak mengubah route internal inti
-- runtime publik aktif `kangtrade.top` masih belum terbukti sama dengan runtime repo ini
-
-## 1A. Status komponen blueprint besar
-
-- implemented & connected di repo: intelligence, microstructure, history, workers, backtest, execution summary/trade outcome summary, Telegram operational UI, callback server, nginx renderer
-- belum terbukti di runtime publik aktif: wiring `/healthz` dan `/indodax/callback`
-- masih parsial: compatibility layer legacy `/tapi` + V2 pada execution/recovery
+- repo internal sudah sinkron dan tervalidasi
+- callback publik final = `PUBLIC_BASE_URL + INDODAX_CALLBACK_PATH`
+- route internal tetap stabil di `/healthz` dan `/indodax/callback`
+- Telegram tetap UI utama via long polling
+- akun tetap disimpan di `data/accounts/accounts.json`
+- `.env.example` sekarang ada dan sinkron dengan source nyata
 
 ---
 
-## 2. Pemisahan concern yang berlaku
+## 2. Status komponen blueprint besar
 
-### Domain / callback publik
-
-- `PUBLIC_BASE_URL`
-- `INDODAX_CALLBACK_PATH`
-- hasil final callback URL = keduanya digabung
-
-### Route internal stabil
-
-- app health = `/healthz`
-- callback listener = `/indodax/callback`
-
-### Vendor outbound Indodax
-
-- public market API = `INDODAX_PUBLIC_BASE_URL`
-- legacy private `/tapi` = `INDODAX_PRIVATE_BASE_URL`
-- Trade API 2.0 = `INDODAX_TRADE_API_V2_BASE_URL`
-
-### Telegram
-
-- tetap panel/UI utama
-- tetap long polling
-- tidak dipaksa webhook
+- implemented & connected: `MarketWatcher`, `SignalEngine`, intelligence pipeline / `OpportunityAssessment`, microstructure, history, backtest, workers, Telegram operational UI, callback server, nginx renderer
+- implemented but partial: `ExecutionEngine` karena recovery/history masih hybrid legacy `/tapi` + V2
+- exists but not yet proven in public runtime: public ingress `/healthz` dan `/indodax/callback`
 
 ---
 
-## 3. Status contract Indodax
+## 3. Concern separation yang berlaku
 
-Status saat ini: **campur legacy dan V2**, tetapi pemisahannya sekarang sudah jelas.
-
-- legacy `/tapi` masih dipakai untuk compatibility/recovery tertentu
-- history baru sudah diarahkan ke Trade API 2.0:
-  - `GET /api/v2/order/histories`
-  - `GET /api/v2/myTrades`
-- contract V2 yang berlaku sekarang:
-  - base `https://tapi.indodax.com`
-  - header `X-APIKEY`
-  - signature query string
-  - param signed `symbol`, `timestamp`, `recvWindow`
+- publik: `PUBLIC_BASE_URL` + `INDODAX_CALLBACK_PATH`
+- internal route stabil: `/healthz`, `/indodax/callback`
+- vendor outbound: `INDODAX_PUBLIC_BASE_URL`, `INDODAX_PRIVATE_BASE_URL`, `INDODAX_TRADE_API_V2_BASE_URL`
+- nginx: render/proxy dari env
+- Telegram: UI/panel utama
 
 ---
 
-## 4. Hal yang sudah ditutup
+## 4. Status contract Indodax
 
-- hardcode target lama `8787/8788`, `bot.example.com`, `/hooks/indodax`
-- implementasi V2 lama yang salah base/header/signature
-- callback server yang terlalu percaya `X-Forwarded-Host`
-- ketiadaan `.env.example`
-- belum adanya script `render:nginx` di `package.json`
-
----
-
-## 5. Blocker yang masih tersisa
-
-### P0
-
-- domain publik aktif belum terbukti memakai wiring repo ini
-- `/healthz` publik belum terbukti mengarah ke app server repo
-- `/indodax/callback` publik belum terbukti mengarah ke callback server repo
-- penutupan blocker ini butuh akses deploy/runtime aktif di luar repo jika preview/custom domain tidak dikelola dari environment ini
-
-### P1
-
-- execution/recovery masih membawa compatibility layer legacy + V2 sehingga kompleksitas tetap ada
+- status final: hybrid legacy + V2
+- legacy masih dipakai untuk `trade`, `cancelOrder`, `openOrders`, `orderHistory`, `tradeHistory`, `getOrder`
+- V2 nyata dipakai untuk `GET /api/v2/order/histories` dan `GET /api/v2/myTrades`
+- history mode nyata: `v2_prefer | v2_only | legacy`
 
 ---
 
-## 6. Validasi cepat yang bisa dipakai ulang
+## 5. Hal yang sudah ditutup
 
-- `yarn lint`
-- `yarn build`
-- `yarn render:nginx`
-- `tests/runtime_backend_regression.ts`
-- `tests/worker_timeout_probe.ts`
-- `tests/live_execution_hardening_probe.ts`
-- `tests/execution_summary_failed_probe.ts`
-- `tests/telegram_menu_navigation_probe.ts`
-- `tests/telegram_slippage_confirmation_probe.ts`
-- `tests/indodax_history_v2_probe.ts`
-- `tests/private_api_v2_mapping_probe.ts`
-- `tests/http_servers_probe.ts`
-- `tests/nginx_renderer_probe.ts`
-- `tests/app_lifecycle_servers_probe.ts`
+- docs vs source sekarang sinkron
+- `.env.example` yang sempat tidak ada sudah ditambahkan
+- README tidak lagi overclaim live/public runtime
+- source of truth dipusatkan ke `REFACTOR_LOG.md`
+
+---
+
+## 6. Blocker tersisa
+
+### Dalam repo
+
+- tidak ada blocker P0 correctness dari hasil audit ini
+
+### Luar repo / deploy / ingress
+
+- domain publik aktif belum mengarah ke runtime repo ini
+- verifikasi publik terbaru: `/healthz` masih mengembalikan HTML page, `/indodax/callback` masih mengembalikan gate text `405`
+
+---
+
+## 7. Package / validasi cepat
+
+- script package yang ada: `lint`, `build`, `dev`, `start`, `render:nginx`
+- probe dijalankan langsung via `tsx tests/*.ts`
+- validasi yang lulus: `yarn lint`, `yarn build`, seluruh probe utama di folder `tests/`
+
+---
+
+## 8. Next focus yang relevan
+
+1. selaraskan deploy/infrastructure agar domain publik benar-benar memakai runtime repo ini
+2. bila perlu, sederhanakan compatibility layer legacy + V2 setelah jalur live publik benar-benar stabil
