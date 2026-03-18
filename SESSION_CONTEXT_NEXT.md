@@ -17,7 +17,7 @@ Status aktual repo:
 - `tests/worker_timeout_probe.ts` lulus
 - `tests/live_execution_hardening_probe.ts` lulus
 - `tests/execution_summary_failed_probe.ts` lulus
-- testing agent iteration 6 pass tanpa issue backend
+- testing agent iteration 7 pass tanpa issue blocking
 - runtime utama berlaku:
   `tickers + depth -> MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
 - worker runtime untuk `feature`, `pattern`, dan `backtest` sudah ada
@@ -47,7 +47,7 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - trailing stop valid karena memakai `peakPrice`
 - flow simulasi buy/sell lengkap dan persist ke state
 - live buy / sell / cancel baseline sudah ada
-- order live menyimpan `exchangeOrderId` dan disinkronkan lewat `openOrders()` lalu fallback `getOrder()`
+- order live menyimpan `exchangeOrderId` dan disinkronkan lewat `openOrders()` lalu fallback `getOrder()`, `orderHistory()`, dan snapshot berbasis `tradeHistory` bila perlu
 - startup memanggil `recoverLiveOrdersOnStartup()` untuk order live aktif yang tersisa
 - `position-monitor` memanggil `syncActiveOrders()` sebelum evaluasi exit
 - duplicate active BUY/SELL guard aktif
@@ -55,6 +55,8 @@ Jangan pakai lagi asumsi lama bahwa refactor masih mentah atau belum nyambung.
 - BUY default aggressive limit dari `bestAsk` + slippage bps aman; order buy stale bisa dibatalkan timeout policy
 - fee / executed trade count / weighted average fill ditarik dari exchange saat `tradeHistory` tersedia
 - default take profit 15% bisa diubah dari Telegram
+- `attemptAutoBuy()` skip deterministik jika BUY aktif sudah ada
+- `evaluateOpenPositions()` skip deterministik jika posisi sudah punya SELL aktif
 - execution summary aktif untuk BUY/SELL submitted, partially filled, filled, canceled, failed
 - trade outcome summary final aktif hanya saat posisi benar-benar `CLOSED`
 - accuracy label summary yang aktif: `SIMULATED`, `OPTIMISTIC_LIVE`, `PARTIAL_LIVE`, `CONFIRMED_LIVE`

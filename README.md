@@ -14,7 +14,7 @@ Yang sudah aktif end-to-end:
 - intelligence pipeline (microstructure, history, probability, edge validation, entry timing)
 - worker runtime untuk feature/pattern/backtest
 - backtest replay dari pair-history JSONL
-- live execution hardening baseline (openOrders-first sync, getOrder fallback, duplicate guard, aggressive BUY, TP default 15%)
+- live execution hardening baseline (openOrders-first sync, getOrder -> orderHistory/tradeHistory fallback, duplicate guard, aggressive BUY, TP default 15%)
 - execution summary dan trade outcome summary ke Telegram/journal/log/persistence
 
 ## Fitur execution summary & trade outcome summary
@@ -59,6 +59,7 @@ Catatan penting:
 
 - `CONFIRMED_LIVE` dipakai saat detail reconciliation exchange cukup kuat untuk event tersebut.
 - jika fee / executed trade detail belum final, summary tetap ditulis jujur sebagai `OPTIMISTIC_LIVE` atau `PARTIAL_LIVE`.
+- auto-buy dan auto-sell sekarang skip deterministik bila order aktif sejenis masih ada, supaya restart/loop monitor tidak memicu duplicate submit.
 
 ## Struktur repo penting
 

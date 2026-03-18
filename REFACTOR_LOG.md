@@ -21,7 +21,7 @@ Validasi yang sudah diverifikasi pada repo lokal:
   `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-live-hardening-probe-self LOG_DIR=/tmp/mafiamarkets-live-hardening-probe-self/logs TEMP_DIR=/tmp/mafiamarkets-live-hardening-probe-self/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts`
 - probe summary failure path lulus:
   `TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it6-failed-self LOG_DIR=/tmp/mafiamarkets-it6-failed-self/logs TEMP_DIR=/tmp/mafiamarkets-it6-failed-self/tmp yarn tsx /app/tests/execution_summary_failed_probe.ts`
-- testing agent iteration 6 juga menyatakan backend pass tanpa issue kritis/minor
+- testing agent iteration 7 juga menyatakan backend pass tanpa issue blocking
 
 Jalur runtime aktual yang berlaku sekarang:
 
@@ -114,13 +114,16 @@ Layer inti:
 ### 3.4 Trading + execution hardening + summary
 
 - `ExecutionEngine` membaca `OpportunityAssessment` untuk FULL_AUTO.
-- `syncActiveOrders()` dipanggil oleh loop `position-monitor` dan mencoba `openOrders()` dulu lalu fallback ke `getOrder()`.
+- `syncActiveOrders()` dipanggil oleh loop `position-monitor` dan mencoba `openOrders()` dulu lalu fallback ke `getOrder()`, `orderHistory()`, lalu snapshot berbasis `tradeHistory` bila diperlukan.
 - `recoverLiveOrdersOnStartup()` aktif saat start untuk recovery order live tersisa.
 - repeated partial BUY fill digabung ke **satu posisi logis per pair/account** melalui `PositionManager`.
 - reconciliation mencoba menarik executed quantity, weighted average fill, fee, executed trade count, dan last executed timestamp via `tradeHistory` jika tersedia.
 - parser fee mencegah double-count saat payload membawa `fee` dan `fee_*`.
 - BUY default memakai **aggressive limit / limit rasa market** dari `bestAsk` + slippage bps terukur, dengan timeout cancel untuk order buy yang stale.
 - SELL / TP baseline praktis untuk token pump cepat dengan **default take profit 15%** yang bisa diubah dari Telegram.
+- `attemptAutoBuy()` sekarang skip deterministik jika BUY aktif untuk pair/account yang sama masih ada.
+- `evaluateOpenPositions()` sekarang skip deterministik jika posisi sudah punya SELL aktif, sehingga restart/loop monitor tidak memicu duplicate sell atau spam error.
+- `sellAllPositions()` sekarang melaporkan jumlah submitted vs skipped secara jujur untuk rekonsiliasi operasional.
 - `PositionRecord` sekarang melacak quantity/fill lifecycle yang cukup untuk summary final: `totalBoughtQuantity`, `totalSoldQuantity`, `averageExitPrice`, `totalEntryFeesPaid`.
 - `SummaryService` sekarang menulis execution summary dan trade outcome summary ke persistence + journal + logger + Telegram broadcast hook.
 
@@ -204,6 +207,8 @@ Sudah tertutup dan jangan dianggap backlog lagi:
 - aggressive BUY policy + timeout cancel untuk stale buy
 - default take profit 15% via Telegram
 - capture fee / executed trade count / weighted average fill via `tradeHistory` bila tersedia
+- fallback recovery `getOrder -> orderHistory -> tradeHistory snapshot`
+- skip guard deterministik untuk auto-buy dan auto-sell saat order aktif masih ada
 - execution summary untuk submitted / partial / filled / canceled / failed
 - trade outcome summary final saat posisi benar-benar closed
 - guardrail failure-path lewat `tests/execution_summary_failed_probe.ts`

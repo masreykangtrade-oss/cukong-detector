@@ -451,7 +451,7 @@ export class ExecutionEngine {
   private async syncOrderWithSnapshot(
     order: OrderRecord,
     snapshot: ExchangeOrderSnapshot,
-    source: 'getOrder' | 'openOrders',
+    source: 'getOrder' | 'openOrders' | 'orderHistory' | 'tradeHistoryFallback',
     tradeStats: ExchangeTradeStats | null = null,
   ): Promise<OrderRecord | undefined> {
     const averageFillPrice = snapshot.averageFillPrice ?? order.price;
@@ -617,6 +617,7 @@ export class ExecutionEngine {
     const api = this.indodax.forAccount(account);
     const tradeStats = await this.loadTradeStats(order);
     let snapshot: ExchangeOrderSnapshot | null = null;
+    let source: 'getOrder' | 'orderHistory' | 'tradeHistoryFallback' = 'getOrder';
 
     try {
       const response = await api.getOrder(order.pair, order.exchangeOrderId);
@@ -635,10 +636,16 @@ export class ExecutionEngine {
 
     if (!snapshot) {
       snapshot = await this.loadOrderHistorySnapshot(order);
+      if (snapshot) {
+        source = 'orderHistory';
+      }
     }
 
     if (!snapshot) {
       snapshot = this.buildTradeStatsFallbackSnapshot(order, tradeStats);
+      if (snapshot) {
+        source = 'tradeHistoryFallback';
+      }
     }
 
     if (!snapshot) {
@@ -648,11 +655,7 @@ export class ExecutionEngine {
     return this.syncOrderWithSnapshot(
       order,
       this.mergeTradeStatsIntoSnapshot(snapshot, tradeStats),
-      snapshot.exchangeStatus.includes('trade_history')
-        ? 'getOrder'
-        : snapshot.exchangeStatus === 'closed'
-          ? 'getOrder'
-          : 'getOrder',
+      source,
       tradeStats,
     );
   }
@@ -1381,15 +1384,19 @@ export class ExecutionEngine {
 
   async sellAllPositions(): Promise<string> {
     const openPositions: PositionRecord[] = this.positions.listOpen();
+    let submitted = 0;
+    let skipped = 0;
 
     for (const position of openPositions) {
       if (this.hasActiveOrder(position.pair, 'sell', position.accountId, position.id)) {
+        skipped += 1;
         continue;
       }
 
       await this.manualSell(position.id, position.quantity, 'AUTO', 'SELL_ALL_POSITIONS');
+      submitted += 1;
     }
 
-    return `Closed ${openPositions.length} positions`;
+    return `Submitted SELL for ${submitted} positions; skipped ${skipped} positions with active SELL orders`;
   }
 }
