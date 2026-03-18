@@ -133,6 +133,33 @@ function readRequiredString(name: string): string {
   return value;
 }
 
+function assertProductionRoutingEnv(config: Pick<EnvConfig, 'nodeEnv' | 'indodaxEnableCallbackServer'>): void {
+  if (config.nodeEnv !== 'production') {
+    return;
+  }
+
+  const required = ['PUBLIC_BASE_URL', 'APP_PORT', 'APP_BIND_HOST'] as const;
+  for (const name of required) {
+    if (!readString(name)) {
+      throw new Error(`Missing required environment variable in production: ${name}`);
+    }
+  }
+
+  if (config.indodaxEnableCallbackServer) {
+    const callbackRequired = [
+      'INDODAX_CALLBACK_PATH',
+      'INDODAX_CALLBACK_PORT',
+      'INDODAX_CALLBACK_BIND_HOST',
+      'INDODAX_CALLBACK_ALLOWED_HOST',
+    ] as const;
+    for (const name of callbackRequired) {
+      if (!readString(name)) {
+        throw new Error(`Missing required environment variable in production: ${name}`);
+      }
+    }
+  }
+}
+
 function readNumber(name: string, fallback: number): number {
   const raw = readString(name);
   if (!raw) {
@@ -313,6 +340,8 @@ export const env: EnvConfig = {
   maxBuySlippageBps: readNumber('MAX_BUY_SLIPPAGE_BPS', 150),
   buyOrderTimeoutMs: readNumber('BUY_ORDER_TIMEOUT_MS', 8_000),
 };
+
+assertProductionRoutingEnv(env);
 
 export function isProductionEnv(): boolean {
   return env.nodeEnv === 'production';

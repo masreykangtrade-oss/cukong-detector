@@ -1,77 +1,30 @@
-# PRD — Mafiamarkets P0 Indodax v2 / Callback / Nginx Final
+# PRD — Final Audit Readiness Kangtrade / Telegram / Indodax
 
 ## Original Problem Statement
-User meminta P0 langsung pada repo mafiamarkets-refactor-tiga dengan konteks utama:
-- REFACTOR_LOG.md
-- SESSION_CONTEXT_NEXT.md
-- README.md
-- mafiamarkets-blueprint.md
-
-Tugas P0 sekarang:
-1. Migrasi endpoint history Indodax ke v2
-2. Tambahkan callback server Indodax yang configurable penuh via .env
-3. Tambahkan template nginx + renderer supaya saat ganti domain atau VPS cukup ubah .env lalu render config
-
-Aturan wajib:
-- audit singkat dulu, lalu langsung implementasi nyata
-- jangan berhenti di penjelasan
-- jangan buat placeholder palsu
-- jangan merusak flow trading, execution, state, persistence, startup, shutdown, dan Telegram
-- wiring antar modul harus benar-benar nyata
-- verifikasi build, lint, dan probe/test harus dijalankan lalu dilaporkan jujur
-- kalau ada blocker, tulis spesifik
-- jangan overclaim live-ready bila live end-to-end belum terbukti
+User meminta audit readiness live terakhir pada repo `https://github.com/bcbcrey-hue/cukong-markets` dengan target publik `https://kangtrade.top` dan callback final `https://kangtrade.top/indodax/callback`, menggunakan secret runtime nyata tanpa pernah mencetak secret penuh. Scope utama: sinkronisasi domain/callback/nginx/env contract, verifikasi Telegram whitelist dan token, verifikasi vendor Indodax secara aman tanpa live trade berisiko, hardening ringan, smoke test aman, perbaikan mismatch yang masih tersisa, serta update README / REFACTOR_LOG / SESSION_CONTEXT_NEXT / .env.example.
 
 ## Architecture Decisions
-- Pertahankan arsitektur final `scanner -> signal -> intelligence -> execution` dan tidak membongkar flow trading yang sudah stabil.
-- History Indodax ditambah mode env `v2_prefer | v2_only | legacy`, dengan default `v2_prefer` untuk migrasi aman bertahap.
-- Response v2 dimap ke model internal legacy-compatible agar recovery, fill aggregation, fee accounting, order status, dan position state tetap memakai jalur core yang sama.
-- Pilih arsitektur **callback server terpisah port** karena paling stabil untuk user awam: callback traffic tidak bercampur dengan health/main runtime endpoint, nginx lebih mudah dirender, dan domain/VPS bisa diganti cukup dari `.env`.
-- Tambahkan `src/server/appServer.ts` untuk app health HTTP ringan (`/healthz`) dan `src/integrations/indodax/callbackServer.ts` untuk callback endpoint env-driven.
-- Persist callback state + callback events ke disk agar aman saat restart.
-- Tambahkan nginx template + renderer berbasis `.env` agar minim edit manual saat pindah domain/VPS.
+- Pertahankan arsitektur runtime utama `scanner -> signal -> intelligence -> execution`; hindari refactor besar.
+- Pertahankan callback server Indodax sebagai server terpisah port agar health app dan callback tetap terisolasi.
+- Sync repo ke target operasional final: `kangtrade.top`, `/indodax/callback`, port `3000/3001`.
+- Koreksi contract Indodax Trade API v2 mengikuti docs resmi terbaru: base `https://tapi.indodax.com`, header `X-APIKEY`, signature atas query string, dan param `symbol/timestamp/recvWindow`.
+- Tambahkan hardening ringan pada callback host extraction: host langsung publik harus menang atas spoof `X-Forwarded-Host`.
+- Tambahkan fail-fast ringan untuk env routing penting saat `NODE_ENV=production`.
 
 ## What’s Implemented
-- Audit pemakaian history lama menemukan caller inti di `ExecutionEngine` pada jalur `orderHistory()` dan `tradeHistory()`.
-- Tambah env baru di `src/config/env.ts`:
-  - `PUBLIC_BASE_URL`
-  - `APP_PORT`
-  - `APP_BIND_HOST`
-  - `INDODAX_HISTORY_MODE`
-  - `INDODAX_CALLBACK_PATH`
-  - `INDODAX_CALLBACK_PORT`
-  - `INDODAX_CALLBACK_BIND_HOST`
-  - `INDODAX_CALLBACK_ALLOWED_HOST`
-  - `INDODAX_ENABLE_CALLBACK_SERVER`
-- Tambah type callback persistence di `src/core/types.ts`.
-- Tambah persistence baru di `src/services/persistenceService.ts`:
-  - `data/state/indodax-callback-state.json`
-  - `data/history/indodax-callback-events.jsonl`
-- Tambah method v2 di `src/integrations/indodax/privateApi.ts`:
-  - `orderHistoriesV2()` → `GET /api/v2/order/histories`
-  - `myTradesV2()` → `GET /api/v2/myTrades`
-- Mapping v2 sekarang dikonversi ke shape internal legacy-compatible untuk order/trade history.
-- `src/domain/trading/executionEngine.ts` sekarang memilih mode history sesuai env dan menjaga fallback/recovery tanpa merusak flow lama.
-- Tambah `src/server/appServer.ts` untuk `/healthz` app utama.
-- Tambah `src/integrations/indodax/callbackServer.ts` untuk callback server terpisah port dengan:
-  - callback path dari env
-  - host allow-list dari env
-  - response cepat `ok` / `fail`
-  - `/healthz`
-  - logging + journal
-  - persist callback event/state ke disk
-- `src/app.ts` sekarang mewiring app server + callback server ke lifecycle start/stop nyata.
-- Tambah deployment helper:
-  - `deploy/nginx/mafiamarkets.nginx.conf.template`
-  - `scripts/render-nginx-conf.mjs`
-- Update dokumen final:
-  - `.env.example`
-  - `README.md`
-  - `REFACTOR_LOG.md`
-  - `SESSION_CONTEXT_NEXT.md`
+- Menambahkan `.env.example` bersih dan sinkron dengan target live final tanpa secret.
+- Mengubah fallback routing utama di `src/config/env.ts` ke `APP_PORT=3000` dan `INDODAX_CALLBACK_PORT=3001` serta menambah `INDODAX_TRADE_API_V2_BASE_URL`.
+- Memperbaiki `src/integrations/indodax/privateApi.ts` agar v2 memakai contract resmi terbaru dan tetap memetakan response ke shape internal legacy-compatible.
+- Memperbarui `src/integrations/indodax/client.ts` agar memakai base URL v2 baru dari env.
+- Menambahkan hardening di `src/integrations/indodax/callbackServer.ts` agar host publik valid tidak kalah oleh spoof header forwarded.
+- Memperbarui nginx template + renderer agar sinkron dengan `kangtrade.top`, `/indodax/callback`, `3000/3001`, dan meneruskan `X-Forwarded-Host`.
+- Memperbarui probe: `private_api_v2_mapping_probe`, `http_servers_probe`, `nginx_renderer_probe`, `app_lifecycle_servers_probe`.
+- Memperbarui `README.md`, `REFACTOR_LOG.md`, dan `SESSION_CONTEXT_NEXT.md` agar sinkron penuh dengan audit final.
+- Menjalankan smoke test aman read-only ke Telegram dan Indodax vendor nyata; tidak ada live trade yang dikirim.
 
 ## Verification Executed
 Lulus:
+- `yarn install`
 - `yarn lint`
 - `yarn build`
 - `tests/runtime_backend_regression.ts`
@@ -85,25 +38,33 @@ Lulus:
 - `tests/http_servers_probe.ts`
 - `tests/nginx_renderer_probe.ts`
 - `tests/app_lifecycle_servers_probe.ts`
-- testing agent iteration 9 backend audit pass
+- testing agent iteration 10 backend audit
+
+Smoke test live-readonly yang benar-benar dilakukan:
+- `Telegram getMe` valid
+- `Telegram getWebhookInfo` valid (webhook tidak terpasang)
+- `Indodax getInfo` valid
+- `GET https://tapi.indodax.com/api/v2/order/histories?...` valid 200 read-only
+- `GET https://tapi.indodax.com/api/v2/myTrades?...` valid 200 read-only
+- `GET https://kangtrade.top/healthz` masih mismatch (HTML frontend)
+- `GET/POST https://kangtrade.top/indodax/callback` masih mismatch dengan contract repo
 
 ## Prioritized Backlog
 ### P0
-- Validasi live vendor untuk endpoint v2 Indodax.
-- Validasi live callback delivery dari Indodax ke domain publik nyata.
-- Perkuat fallback accounting saat detail trade exchange tidak lengkap.
-- Dalami edge-case recovery restart live order parsial/terminal.
+- Sinkronkan runtime/nginx publik `kangtrade.top` ke hasil render repo terbaru.
+- Buktikan `/healthz` publik mengarah ke JSON runtime repo ini.
+- Buktikan callback publik live benar-benar dilayani callback server repo ini.
+- Re-run public smoke test setelah domain/runtime sinkron.
 
 ### P1
-- Pindahkan pattern matching live path ke worker runtime bila perlu offload konsisten.
-- Upgrade `recentTrades` dari inferred flow ke native trade print bila ada sumber valid.
-- Pecah `executionEngine.ts` menjadi modul lebih kecil setelah P0 aman.
+- Perkuat recovery edge-case order live parsial/terminal.
+- Perkuat fallback accounting bila detail fill/fee exchange parsial.
 
 ### P2
-- Verifikasi end-to-end Telegram live delivery saat validasi live diizinkan.
 - Tambah runbook backup/restore folder `data/`.
 
-## Honest Notes
-- Endpoint v2 dan callback server belum dibuktikan end-to-end ke vendor/live domain pada sesi ini.
-- Probe HTTP server dan nginx renderer memakai perilaku lokal nyata.
-- Beberapa probe exchange/Telegram masih memakai fake harness by design.
+## Next Tasks
+1. Terapkan config nginx hasil render terbaru pada runtime publik `kangtrade.top`.
+2. Verifikasi ulang `/healthz` publik dan callback publik setelah runtime sinkron.
+3. Re-run validasi live-readonly vendor dan Telegram pada domain publik yang sudah benar.
+4. Baru setelah itu simpulkan live readiness penuh.
