@@ -88,6 +88,7 @@ Status saat ini: **campur legacy dan V2**, tetapi pemisahannya sekarang sudah je
 - domain publik aktif belum terbukti memakai wiring repo ini
 - `/healthz` publik belum terbukti mengarah ke app server repo
 - `/indodax/callback` publik belum terbukti mengarah ke callback server repo
+- penutupan blocker ini butuh akses deploy/runtime aktif di luar repo jika preview/custom domain tidak dikelola dari environment ini
 
 ### P1
 
