@@ -2,34 +2,40 @@
 
 Backend TypeScript untuk bot intelijen market Indodax dengan UI operasional utama di Telegram.
 
-## Status aktual repo
+## Status repo saat ini
 
 Runtime utama repo yang berlaku sekarang:
 
 `tickers + depth -> MarketWatcher -> SignalEngine -> intelligence pipeline -> OpportunityAssessment -> Hotlist -> ExecutionEngine`
 
-Yang sudah terverifikasi di repo lokal:
-
-- `yarn install` selesai
-- `yarn lint` lulus
-- `yarn build` lulus
-- `tests/runtime_backend_regression.ts` lulus
-- `tests/worker_timeout_probe.ts` lulus
-- `tests/live_execution_hardening_probe.ts` lulus
-- `tests/execution_summary_failed_probe.ts` lulus
-- `tests/telegram_menu_navigation_probe.ts` lulus
-- `tests/telegram_slippage_confirmation_probe.ts` lulus
-- testing agent iteration 8 juga menyatakan backend pass tanpa issue blocking
-
-Status implementasi end-to-end yang aktif:
+Yang sudah aktif dan terhubung:
 
 - scanner market + hotlist berbasis `OpportunityAssessment`
 - intelligence pipeline (microstructure, history, probability, edge validation, entry timing)
 - worker runtime untuk feature/pattern/backtest
 - backtest replay dari pair-history JSONL
-- live execution hardening baseline (openOrders-first sync, getOrder -> orderHistory/tradeHistory fallback, duplicate guard, aggressive BUY, TP default 15%)
+- live execution hardening baseline (openOrders-first sync, getOrder -> history fallback, duplicate guard, aggressive BUY, TP default 15%)
 - execution summary dan trade outcome summary ke Telegram/journal/log/persistence
-- Telegram UI sudah dirapikan menjadi menu hierarkis 7 kategori, bukan flat dashboard lama
+- Telegram UI hierarkis 7 kategori
+- mode history Indodax `v2_prefer | v2_only | legacy`
+- callback server Indodax full env-driven
+- nginx template + renderer untuk ganti domain/VPS cukup ubah `.env` lalu render ulang
+
+## Arsitektur yang dipilih
+
+Arsitektur yang dipakai sekarang adalah **callback server terpisah port**.
+
+Alasannya:
+
+- lebih stabil untuk operasional user awam
+- traffic callback tidak bercampur dengan health/main runtime endpoint
+- nginx bisa mengarahkan path callback ke port khusus tanpa mengganggu app utama
+- saat ganti domain atau VPS, cukup ubah `.env` lalu render ulang config nginx
+
+Port default:
+
+- app utama: `APP_PORT=8787`
+- callback server: `INDODAX_CALLBACK_PORT=8788`
 
 ## Telegram UI operasional
 
@@ -43,119 +49,116 @@ Main Menu sekarang **hanya** berisi 7 kategori:
 6. `👤 Accounts`
 7. `🧪 Backtest`
 
-Struktur baru yang aktif:
+Semua submenu punya tombol `Kembali`, callback navigasi dipisah ke namespace `NAV`, dan callback aksi live lama tetap dipertahankan.
 
-- `Execute Trade` → Start Bot, Stop Bot, Status, Kembali
-- `Emergency Controls` → Pause Auto, Pause All, Cancel All Orders, Sell All Positions, Kembali
-- `Monitoring / Laporan` → Market Watch, Hotlist, Intelligence Report, Spoof Radar, Pattern Match, Logs, Kembali
-- `Positions / Orders / Manual Trade` → Positions, Orders, Manual Buy, Manual Sell, Buy Slippage X bps, Kembali
-- `Settings` → Strategy Settings, Risk Settings, Kembali
-- `Accounts` → Accounts → List Accounts, Upload JSON, Reload Accounts, Kembali
-- `Backtest` → Backtest → Run Top Pair, Run All Recent, Last Result, Kembali
+## Env wajib
 
-Aturan UX yang aktif sekarang:
+Salin `.env.example` menjadi `.env`, lalu isi minimal:
 
-- menu navigasi memakai namespace callback `NAV`, terpisah dari callback aksi trading
-- semua submenu punya tombol `Kembali`
-- submenu nested kembali ke parent yang tepat, bukan selalu lompat membingungkan ke root
-- callback lama untuk aksi live tetap dipertahankan agar tidak memutus wiring fitur yang sudah ada
-
-## Slippage BUY
-
-Status slippage yang aktif sekarang:
-
-- default `buySlippageBps = 60`
-- max `maxBuySlippageBps = 150`
-- tombol `Buy Slippage X bps` sudah dipindahkan ke submenu `Positions / Orders / Manual Trade`
-- execution engine tetap memakai aggressive buy limit dari `bestAsk + slippage bps` dan clamp ke `maxBuySlippageBps`
-- jika user Telegram memasukkan nilai di atas `150 bps`, bot memberi warning dan minta konfirmasi; jika user balas `LANJUT`, nilai aman yang disimpan adalah `150 bps`
-- settings lama dengan default legacy `25/80` dimigrasikan ke `60/150`
-
-## Fitur execution summary & trade outcome summary
-
-### Execution summary
-
-Event berikut menghasilkan summary yang konsisten:
-
-- BUY submitted
-- BUY partially filled
-- BUY filled
-- BUY canceled / failed
-- SELL submitted
-- SELL partially filled
-- SELL filled
-- SELL canceled / failed
-
-Channel minimum yang aktif:
-
-- Telegram broadcast ke `TELEGRAM_ALLOWED_USER_IDS`
-- journal JSONL
-- log operasional pino
-- persistence JSONL khusus summary
-
-File persistence summary:
-
-- `data/history/execution-summaries.jsonl`
-- `data/history/trade-outcomes.jsonl`
-
-### Trade outcome summary
-
-Trade outcome summary final hanya ditulis ketika posisi benar-benar `CLOSED`.
-
-Semantik akurasi yang dipakai:
-
-- `SIMULATED`
-- `OPTIMISTIC_LIVE`
-- `PARTIAL_LIVE`
-- `CONFIRMED_LIVE`
-
-## Struktur repo penting
-
-```text
-src/
-  app.ts
-  bootstrap.ts
-  config/
-  core/
-  domain/
-    accounts/
-    backtest/
-    history/
-    intelligence/
-    market/
-    microstructure/
-    settings/
-    signals/
-    trading/
-  integrations/
-    indodax/
-    telegram/
-  services/
-  storage/
-  workers/
-tests/
-REFACTOR_LOG.md
-SESSION_CONTEXT_NEXT.md
-mafiamarkets-blueprint.md
-```
-
-## Environment
-
-Salin nilai dari `.env.example` ke `.env` lalu isi token/kredensial yang benar.
-
-Variabel paling penting:
-
+- `PUBLIC_BASE_URL`
+- `APP_PORT`
+- `APP_BIND_HOST`
+- `INDODAX_CALLBACK_PATH`
+- `INDODAX_CALLBACK_PORT`
+- `INDODAX_CALLBACK_BIND_HOST`
+- `INDODAX_CALLBACK_ALLOWED_HOST`
+- `INDODAX_ENABLE_CALLBACK_SERVER`
+- `INDODAX_HISTORY_MODE`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_ALLOWED_USER_IDS`
 - `DATA_DIR`
 - `LOG_DIR`
 - `TEMP_DIR`
-- `INDODAX_PUBLIC_BASE_URL`
-- `INDODAX_PRIVATE_BASE_URL`
-- `BUY_SLIPPAGE_BPS`
-- `MAX_BUY_SLIPPAGE_BPS`
 
-## Perintah utama
+## Cara set domain
+
+1. Isi `PUBLIC_BASE_URL`, misalnya `https://bot.example.com`
+2. Isi `INDODAX_CALLBACK_ALLOWED_HOST` dengan host yang sama, misalnya `bot.example.com`
+3. Isi `INDODAX_CALLBACK_PATH`, misalnya `/hooks/indodax`
+4. Render ulang nginx config
+
+## Cara set callback path
+
+Ubah di `.env`:
+
+```bash
+INDODAX_CALLBACK_PATH=/hooks/indodax
+```
+
+Callback URL publik akan diturunkan dari:
+
+`PUBLIC_BASE_URL + INDODAX_CALLBACK_PATH`
+
+## Cara set port
+
+Ubah di `.env`:
+
+```bash
+APP_PORT=8787
+INDODAX_CALLBACK_PORT=8788
+APP_BIND_HOST=0.0.0.0
+INDODAX_CALLBACK_BIND_HOST=0.0.0.0
+```
+
+## Cara render nginx config
+
+Setelah `.env` siap, jalankan:
+
+```bash
+node scripts/render-nginx-conf.mjs
+```
+
+Output final akan ada di:
+
+```bash
+deploy/nginx/mafiamarkets.nginx.conf
+```
+
+## Saat ganti domain
+
+Yang perlu diubah hanya:
+
+- `PUBLIC_BASE_URL`
+- `INDODAX_CALLBACK_ALLOWED_HOST`
+
+Lalu render ulang config nginx:
+
+```bash
+node scripts/render-nginx-conf.mjs
+```
+
+## Saat ganti VPS
+
+Yang perlu dipindahkan:
+
+- source code repo
+- file `.env`
+- folder `data/` jika ingin membawa state/history/account lama
+
+Lalu jalankan lagi:
+
+```bash
+yarn install
+yarn build
+node scripts/render-nginx-conf.mjs
+yarn dev
+```
+
+## Cara cek callback aktif
+
+Jika callback server aktif, cek:
+
+```bash
+curl http://127.0.0.1:${INDODAX_CALLBACK_PORT}/healthz
+```
+
+Health app utama:
+
+```bash
+curl http://127.0.0.1:${APP_PORT}/healthz
+```
+
+## Cara menjalankan app dan callback
 
 ```bash
 yarn install
@@ -164,21 +167,34 @@ yarn build
 yarn dev
 ```
 
+Jika `INDODAX_ENABLE_CALLBACK_SERVER=true`, callback server ikut start saat app dijalankan.
+
+## Mode history Indodax
+
+Pilihan env:
+
+- `INDODAX_HISTORY_MODE=v2_prefer` → coba v2 dulu, fallback ke legacy bila perlu
+- `INDODAX_HISTORY_MODE=v2_only` → pakai v2 saja
+- `INDODAX_HISTORY_MODE=legacy` → pakai history lama saja
+
+Default repo sekarang: `v2_prefer`.
+
 ## Probe / regression penting
 
-```bash
-TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-regression LOG_DIR=/tmp/mafiamarkets-audit-regression/logs TEMP_DIR=/tmp/mafiamarkets-audit-regression/tmp yarn tsx /app/tests/runtime_backend_regression.ts
+Sudah diverifikasi lulus:
 
-TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-audit-timeout LOG_DIR=/tmp/mafiamarkets-audit-timeout/logs TEMP_DIR=/tmp/mafiamarkets-audit-timeout/tmp yarn tsx /app/tests/worker_timeout_probe.ts
-
-TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-live-hardening-probe-self LOG_DIR=/tmp/mafiamarkets-live-hardening-probe-self/logs TEMP_DIR=/tmp/mafiamarkets-live-hardening-probe-self/tmp yarn tsx /app/tests/live_execution_hardening_probe.ts
-
-TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it6-failed-self LOG_DIR=/tmp/mafiamarkets-it6-failed-self/logs TEMP_DIR=/tmp/mafiamarkets-it6-failed-self/tmp yarn tsx /app/tests/execution_summary_failed_probe.ts
-
-TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-telegram-menu LOG_DIR=/tmp/mafiamarkets-telegram-menu/logs TEMP_DIR=/tmp/mafiamarkets-telegram-menu/tmp yarn tsx /app/tests/telegram_menu_navigation_probe.ts
-
-TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamarkets-it8-slip-self LOG_DIR=/tmp/mafiamarkets-it8-slip-self/logs TEMP_DIR=/tmp/mafiamarkets-it8-slip-self/tmp yarn tsx /app/tests/telegram_slippage_confirmation_probe.ts
-```
+- `yarn lint`
+- `yarn build`
+- `tests/runtime_backend_regression.ts`
+- `tests/worker_timeout_probe.ts`
+- `tests/live_execution_hardening_probe.ts`
+- `tests/execution_summary_failed_probe.ts`
+- `tests/telegram_menu_navigation_probe.ts`
+- `tests/telegram_slippage_confirmation_probe.ts`
+- `tests/indodax_history_v2_probe.ts`
+- `tests/private_api_v2_mapping_probe.ts`
+- `tests/http_servers_probe.ts`
+- `tests/nginx_renderer_probe.ts`
 
 ## Data runtime yang dihasilkan
 
@@ -187,19 +203,22 @@ TELEGRAM_BOT_TOKEN=testtoken TELEGRAM_ALLOWED_USER_IDS=1 DATA_DIR=/tmp/mafiamark
 - `data/state/orders.json`
 - `data/state/positions.json`
 - `data/state/trades.json`
+- `data/state/health.json`
+- `data/state/indodax-callback-state.json`
 - `data/state/journal.jsonl`
 - `data/history/pair-history.jsonl`
 - `data/history/anomaly-events.jsonl`
 - `data/history/pattern-outcomes.jsonl`
 - `data/history/execution-summaries.jsonl`
 - `data/history/trade-outcomes.jsonl`
+- `data/history/indodax-callback-events.jsonl`
 - `data/backtest/*.json`
 
-## Catatan kejujuran status
+## Catatan jujur
 
-- jalur broadcast summary ke Telegram sudah ada, tetapi delivery Telegram live belum divalidasi end-to-end pada sesi ini
+- mode history v2, callback server, dan renderer nginx sudah nyata dan teruji via harness/probe lokal
+- endpoint v2 Indodax belum divalidasi end-to-end ke environment live vendor pada sesi ini
+- delivery callback live dari Indodax ke domain publik juga belum dibuktikan end-to-end pada sesi ini
 - `recentTrades` di market intelligence masih inferred dari delta volume lokal, belum native trade feed exchange
-- reconciliation fee / weighted fill sudah memakai `tradeHistory` bila tersedia; fallback saat detail exchange tidak lengkap masih punya backlog lanjutan
-- probe backend memakai fake exchange client / fake Telegram harness, bukan validasi live exchange atau live delivery Telegram
 
 Lihat `REFACTOR_LOG.md` untuk status final lengkap dan `SESSION_CONTEXT_NEXT.md` untuk handoff ringkas sesi berikutnya.

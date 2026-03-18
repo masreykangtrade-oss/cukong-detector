@@ -9,6 +9,7 @@ import type {
   SummaryAccuracy,
   TradingMode,
 } from '../../core/types';
+import { getIndodaxHistoryMode } from '../../config/env';
 import { logger } from '../../core/logger';
 import { nowIso } from '../../utils/time';
 import { IndodaxClient } from '../../integrations/indodax/client';
@@ -377,6 +378,23 @@ export class ExecutionEngine {
   private async loadTradeStats(
     order: OrderRecord,
   ): Promise<ExchangeTradeStats | null> {
+    const mode = getIndodaxHistoryMode();
+
+    if (mode === 'legacy') {
+      return this.loadTradeStatsLegacy(order);
+    }
+
+    const v2TradeStats = await this.loadTradeStatsV2(order);
+    if (v2TradeStats || mode === 'v2_only') {
+      return v2TradeStats;
+    }
+
+    return this.loadTradeStatsLegacy(order);
+  }
+
+  private async loadTradeStatsLegacy(
+    order: OrderRecord,
+  ): Promise<ExchangeTradeStats | null> {
     const api = this.getPrivateApi(order.accountId);
     if (!api || typeof (api as { tradeHistory?: unknown }).tradeHistory !== 'function') {
       return null;
@@ -399,7 +417,64 @@ export class ExecutionEngine {
     }
   }
 
+  private async loadTradeStatsV2(
+    order: OrderRecord,
+  ): Promise<ExchangeTradeStats | null> {
+    const api = this.getPrivateApi(order.accountId);
+    if (!api || typeof (api as { myTradesV2?: unknown }).myTradesV2 !== 'function') {
+      return null;
+    }
+
+    try {
+      const response = await api.myTradesV2({
+        pair: order.pair,
+        orderId: order.exchangeOrderId,
+        limit: 200,
+      });
+      return this.extractTradeStats(order, response.return ?? {});
+    } catch (error) {
+      await this.journal.warn(
+        'TRADE_HISTORY_V2_SYNC_FAILED',
+        error instanceof Error ? error.message : 'unknown myTrades v2 sync failure',
+        {
+          orderId: order.id,
+          exchangeOrderId: order.exchangeOrderId,
+          pair: order.pair,
+        },
+      );
+      return null;
+    }
+  }
+
   private async loadOrderHistorySnapshot(
+    order: OrderRecord,
+  ): Promise<{ snapshot: ExchangeOrderSnapshot | null; source: 'orderHistory' | 'orderHistoryV2' | null }> {
+    const mode = getIndodaxHistoryMode();
+
+    if (mode === 'legacy') {
+      const legacySnapshot = await this.loadOrderHistorySnapshotLegacy(order);
+      return {
+        snapshot: legacySnapshot,
+        source: legacySnapshot ? 'orderHistory' : null,
+      };
+    }
+
+    const v2Snapshot = await this.loadOrderHistorySnapshotV2(order);
+    if (v2Snapshot || mode === 'v2_only') {
+      return {
+        snapshot: v2Snapshot,
+        source: v2Snapshot ? 'orderHistoryV2' : null,
+      };
+    }
+
+    const legacySnapshot = await this.loadOrderHistorySnapshotLegacy(order);
+    return {
+      snapshot: legacySnapshot,
+      source: legacySnapshot ? 'orderHistory' : null,
+    };
+  }
+
+  private async loadOrderHistorySnapshotLegacy(
     order: OrderRecord,
   ): Promise<ExchangeOrderSnapshot | null> {
     const api = this.getPrivateApi(order.accountId);
@@ -415,6 +490,36 @@ export class ExecutionEngine {
       await this.journal.warn(
         'ORDER_HISTORY_SYNC_FAILED',
         error instanceof Error ? error.message : 'unknown orderHistory sync failure',
+        {
+          orderId: order.id,
+          exchangeOrderId: order.exchangeOrderId,
+          pair: order.pair,
+        },
+      );
+      return null;
+    }
+  }
+
+  private async loadOrderHistorySnapshotV2(
+    order: OrderRecord,
+  ): Promise<ExchangeOrderSnapshot | null> {
+    const api = this.getPrivateApi(order.accountId);
+    if (!api || typeof (api as { orderHistoriesV2?: unknown }).orderHistoriesV2 !== 'function') {
+      return null;
+    }
+
+    try {
+      const response = await api.orderHistoriesV2({
+        pair: order.pair,
+        orderId: order.exchangeOrderId,
+        limit: 200,
+      });
+      const match = this.findOrderHistoryMatch(order, response.return ?? {});
+      return match ? this.buildExchangeSnapshotFromOrderFields(order, match, 'closed') : null;
+    } catch (error) {
+      await this.journal.warn(
+        'ORDER_HISTORY_V2_SYNC_FAILED',
+        error instanceof Error ? error.message : 'unknown order histories v2 sync failure',
         {
           orderId: order.id,
           exchangeOrderId: order.exchangeOrderId,
@@ -451,7 +556,7 @@ export class ExecutionEngine {
   private async syncOrderWithSnapshot(
     order: OrderRecord,
     snapshot: ExchangeOrderSnapshot,
-    source: 'getOrder' | 'openOrders' | 'orderHistory' | 'tradeHistoryFallback',
+    source: 'getOrder' | 'openOrders' | 'orderHistory' | 'orderHistoryV2' | 'tradeHistoryFallback',
     tradeStats: ExchangeTradeStats | null = null,
   ): Promise<OrderRecord | undefined> {
     const averageFillPrice = snapshot.averageFillPrice ?? order.price;
@@ -617,7 +722,7 @@ export class ExecutionEngine {
     const api = this.indodax.forAccount(account);
     const tradeStats = await this.loadTradeStats(order);
     let snapshot: ExchangeOrderSnapshot | null = null;
-    let source: 'getOrder' | 'orderHistory' | 'tradeHistoryFallback' = 'getOrder';
+    let source: 'getOrder' | 'orderHistory' | 'orderHistoryV2' | 'tradeHistoryFallback' = 'getOrder';
 
     try {
       const response = await api.getOrder(order.pair, order.exchangeOrderId);
@@ -635,9 +740,10 @@ export class ExecutionEngine {
     }
 
     if (!snapshot) {
-      snapshot = await this.loadOrderHistorySnapshot(order);
-      if (snapshot) {
-        source = 'orderHistory';
+      const historySnapshot = await this.loadOrderHistorySnapshot(order);
+      snapshot = historySnapshot.snapshot;
+      if (historySnapshot.source) {
+        source = historySnapshot.source;
       }
     }
 

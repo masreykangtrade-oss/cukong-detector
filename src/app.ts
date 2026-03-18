@@ -20,6 +20,7 @@ import { PositionManager } from './domain/trading/positionManager';
 import { RiskEngine } from './domain/trading/riskEngine';
 
 import { IndodaxClient } from './integrations/indodax/client';
+import { IndodaxCallbackServer } from './integrations/indodax/callbackServer';
 import { TelegramBot } from './integrations/telegram/bot';
 
 import { HealthService } from './services/healthService';
@@ -29,6 +30,7 @@ import { PollingService } from './services/pollingService';
 import { ReportService } from './services/reportService';
 import { StateService } from './services/stateService';
 import { SummaryService } from './services/summaryService';
+import { AppServer } from './server/appServer';
 
 export interface AppRuntime {
   start(): Promise<void>;
@@ -55,6 +57,8 @@ export async function createApp(): Promise<AppRuntime> {
   const health = new HealthService(persistence, state);
   const report = new ReportService();
   const summary = new SummaryService(persistence, journal, report, accountRegistry);
+  const appServer = new AppServer(health);
+  const callbackServer = new IndodaxCallbackServer(persistence, journal);
 
   await Promise.all([
     state.load(),
@@ -235,6 +239,8 @@ export async function createApp(): Promise<AppRuntime> {
       await workerPool.start();
     }
 
+    await appServer.start();
+    await callbackServer.start();
     await executionEngine.recoverLiveOrdersOnStartup();
 
     await telegram.start();
@@ -245,6 +251,9 @@ export async function createApp(): Promise<AppRuntime> {
     await journal.info('APP_STARTED', 'mafiamarkets app started', {
       mode: settings.get().tradingMode,
       activeAccounts: accountRegistry.countEnabled(),
+      appPort: appServer.getPort(),
+      callbackEnabled: env.indodaxEnableCallbackServer,
+      callbackPort: env.indodaxEnableCallbackServer ? callbackServer.getPort() : null,
     });
 
     logger.info(
@@ -252,6 +261,9 @@ export async function createApp(): Promise<AppRuntime> {
         mode: settings.get().tradingMode,
         activeAccounts: accountRegistry.countEnabled(),
         workers: workerPool.snapshot().length,
+        appPort: appServer.getPort(),
+        callbackEnabled: env.indodaxEnableCallbackServer,
+        callbackPort: env.indodaxEnableCallbackServer ? callbackServer.getPort() : null,
       },
       'mafiamarkets app started',
     );
@@ -262,6 +274,8 @@ export async function createApp(): Promise<AppRuntime> {
 
     polling.stop();
     await telegram.stop();
+    await callbackServer.stop();
+    await appServer.stop();
     await workerPool.stop();
 
     await state.setStatus('STOPPED');

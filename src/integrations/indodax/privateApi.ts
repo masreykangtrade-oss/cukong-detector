@@ -43,6 +43,12 @@ export interface IndodaxTradeHistoryReturn {
     | Record<string, Array<Record<string, string | number>>>;
 }
 
+export interface IndodaxHistoryQueryOptions {
+  pair?: string;
+  limit?: number;
+  orderId?: string | number;
+}
+
 export interface IndodaxCancelOrderReturn {
   order_id?: string | number;
   client_order_id?: string;
@@ -52,6 +58,71 @@ export interface IndodaxCancelOrderReturn {
 function getSellAssetKey(pair: string): string {
   const [baseAsset] = pair.toLowerCase().split('_');
   return baseAsset || 'amount';
+}
+
+function normalizePair(pair?: string): string | undefined {
+  if (!pair) {
+    return undefined;
+  }
+
+  const normalized = pair.trim().toLowerCase().replace(/[\-/]/g, '_');
+  if (normalized.includes('_')) {
+    return normalized;
+  }
+
+  if (normalized.endsWith('idr') && normalized.length > 3) {
+    return `${normalized.slice(0, -3)}_idr`;
+  }
+
+  return normalized;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readValue(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return record[key];
+    }
+  }
+
+  return undefined;
+}
+
+function collectItems(payload: unknown, keys: string[]): Array<Record<string, unknown>> {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => asRecord(item)).filter(Boolean) as Array<Record<string, unknown>>;
+  }
+
+  const record = asRecord(payload);
+  if (!record) {
+    return [];
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      return value.map((item) => asRecord(item)).filter(Boolean) as Array<Record<string, unknown>>;
+    }
+
+    const nestedRecord = asRecord(value);
+    if (nestedRecord) {
+      const nested = collectItems(nestedRecord, keys);
+      if (nested.length > 0) {
+        return nested;
+      }
+    }
+  }
+
+  return [];
+}
+
+function stringifyHeaders(headers: Headers): Record<string, string> {
+  return Object.fromEntries(headers.entries());
 }
 
 export class PrivateApi {
@@ -67,6 +138,21 @@ export class PrivateApi {
 
   private sign(payload: string): string {
     return crypto.createHmac('sha512', this.apiSecret).update(payload).digest('hex');
+  }
+
+  private assertSuccess(method: string, payload: unknown): void {
+    const record = asRecord(payload);
+    if (!record) {
+      return;
+    }
+
+    if (record.success !== undefined && Number(record.success) !== 1) {
+      throw new Error(String(record.error ?? `Private API ${method} failed`));
+    }
+
+    if (record.error) {
+      throw new Error(String(record.error));
+    }
   }
 
   private async post<T>(
@@ -101,6 +187,118 @@ export class PrivateApi {
     }
 
     return payload;
+  }
+
+  private async getV2<T>(
+    path: string,
+    params: Record<string, string | number | undefined> = {},
+  ): Promise<T> {
+    const query = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .map(([key, value]) => [key, String(value)]),
+    );
+
+    const requestUrl = new URL(path, this.baseUrl);
+    if (query.size > 0) {
+      requestUrl.search = query.toString();
+    }
+
+    const signatureSource = requestUrl.pathname + (requestUrl.search ? `?${requestUrl.searchParams.toString()}` : '');
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      headers: {
+        Key: this.apiKey,
+        Sign: this.sign(signatureSource),
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Private API GET ${requestUrl.pathname} failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as T;
+    this.assertSuccess(requestUrl.pathname, payload);
+    return payload;
+  }
+
+  private normalizeV2OrderHistoryItem(
+    item: Record<string, unknown>,
+    pair?: string,
+  ): Record<string, string | number> | null {
+    const normalizedPair = normalizePair(
+      pair ?? String(readValue(item, ['pair', 'market', 'symbol', 'trade_pair']) ?? ''),
+    );
+    const asset = getSellAssetKey(normalizedPair ?? 'amount_idr');
+    const filled = readValue(item, ['filled_qty', 'filled_quantity', 'executed_qty']);
+    const remaining = readValue(item, ['remaining_qty', 'remain_qty', 'remaining', 'leaves_qty', 'remain']);
+    const quantity =
+      readValue(item, [`order_${asset}`, asset, 'amount', 'quantity', 'qty', 'volume']) ??
+      ((Number(filled ?? 0) || Number(remaining ?? 0)) > 0
+        ? (Number(filled ?? 0) + Number(remaining ?? 0))
+        : undefined);
+    const orderId = readValue(item, ['order_id', 'id', 'orderId']);
+
+    if (orderId === undefined || orderId === null) {
+      return null;
+    }
+
+    return {
+      order_id: String(orderId),
+      pair: normalizedPair ?? pair ?? '',
+      type: String(readValue(item, ['type', 'side']) ?? ''),
+      price: readValue(item, ['price', 'order_price', 'avg_price', 'average_price']) as string | number,
+      [`order_${asset}`]: quantity as string | number,
+      [`remain_${asset}`]: (remaining ?? 0) as string | number,
+      status: String(
+        readValue(item, ['status', 'order_status', 'state']) ??
+          (Number(remaining ?? 0) <= 0 ? 'filled' : 'open'),
+      ),
+      submit_time: readValue(item, ['submit_time', 'created_at', 'createdAt', 'timestamp', 'time']) as
+        | string
+        | number,
+      finish_time: readValue(item, ['finish_time', 'updated_at', 'updatedAt', 'closed_at', 'closedAt']) as
+        | string
+        | number,
+    };
+  }
+
+  private normalizeV2TradeItem(
+    item: Record<string, unknown>,
+    pair?: string,
+  ): Record<string, string | number> | null {
+    const normalizedPair = normalizePair(
+      pair ?? String(readValue(item, ['pair', 'market', 'symbol', 'trade_pair']) ?? ''),
+    );
+    const asset = getSellAssetKey(normalizedPair ?? 'amount_idr');
+    const orderId = readValue(item, ['order_id', 'orderId']);
+
+    if (orderId === undefined || orderId === null) {
+      return null;
+    }
+
+    const feeAsset = String(
+      readValue(item, ['fee_asset', 'commission_asset', 'feeAsset']) ??
+        (normalizedPair?.split('_')[1] ?? 'idr'),
+    ).toLowerCase();
+
+    return {
+      trade_id: String(readValue(item, ['trade_id', 'id', 'tradeId']) ?? ''),
+      order_id: String(orderId),
+      pair: normalizedPair ?? pair ?? '',
+      type: String(readValue(item, ['type', 'side']) ?? ''),
+      price: readValue(item, ['price', 'avg_price', 'average_price']) as string | number,
+      [asset]: (readValue(item, [asset, 'amount', 'quantity', 'qty', 'executed_qty']) ?? 0) as
+        | string
+        | number,
+      [`fee_${feeAsset}`]: (readValue(item, [`fee_${feeAsset}`, 'fee', 'commission']) ?? 0) as
+        | string
+        | number,
+      timestamp: readValue(item, ['timestamp', 'created_at', 'createdAt', 'executed_at', 'time']) as
+        | string
+        | number,
+    };
   }
 
   getInfo<T>(): Promise<IndodaxPrivateEnvelope<T>> {
@@ -143,8 +341,48 @@ export class PrivateApi {
     return this.post<IndodaxOrderHistoryReturn>('orderHistory', pair ? { pair } : {});
   }
 
+  async orderHistoriesV2(
+    options: IndodaxHistoryQueryOptions = {},
+  ): Promise<IndodaxPrivateEnvelope<IndodaxOrderHistoryReturn>> {
+    const payload = await this.getV2<unknown>('/api/v2/order/histories', {
+      pair: options.pair,
+      limit: options.limit,
+      order_id: options.orderId,
+    });
+
+    const items = collectItems(payload, ['data', 'results', 'items', 'orders', 'histories']);
+    return {
+      success: 1,
+      return: {
+        orders: items
+          .map((item) => this.normalizeV2OrderHistoryItem(item, options.pair))
+          .filter(Boolean) as Array<Record<string, string | number>>,
+      },
+    };
+  }
+
   tradeHistory(pair?: string): Promise<IndodaxPrivateEnvelope<IndodaxTradeHistoryReturn>> {
     return this.post<IndodaxTradeHistoryReturn>('tradeHistory', pair ? { pair } : {});
+  }
+
+  async myTradesV2(
+    options: IndodaxHistoryQueryOptions = {},
+  ): Promise<IndodaxPrivateEnvelope<IndodaxTradeHistoryReturn>> {
+    const payload = await this.getV2<unknown>('/api/v2/myTrades', {
+      pair: options.pair,
+      limit: options.limit,
+      order_id: options.orderId,
+    });
+
+    const items = collectItems(payload, ['data', 'results', 'items', 'trades']);
+    return {
+      success: 1,
+      return: {
+        trades: items
+          .map((item) => this.normalizeV2TradeItem(item, options.pair))
+          .filter(Boolean) as Array<Record<string, string | number>>,
+      },
+    };
   }
 
   getOrder(

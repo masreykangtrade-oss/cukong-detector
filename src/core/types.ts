@@ -370,6 +370,35 @@ export interface TradeOutcomeSummary {
   notes: string[];
 }
 
+export interface IndodaxCallbackEvent {
+  id: string;
+  path: string;
+  method: string;
+  host: string | null;
+  allowedHost: string | null;
+  accepted: boolean;
+  response: 'ok' | 'fail';
+  reason?: string;
+  query: Record<string, string>;
+  headers: Record<string, string>;
+  bodyText: string;
+  parsedBody: Record<string, unknown> | null;
+  receivedAt: string;
+}
+
+export interface IndodaxCallbackState {
+  enabled: boolean;
+  callbackPath: string;
+  callbackUrl: string | null;
+  allowedHost: string | null;
+  lastReceivedAt: string | null;
+  lastResponse: 'ok' | 'fail' | null;
+  acceptedCount: number;
+  rejectedCount: number;
+  lastEventId: string | null;
+  lastSourceHost: string | null;
+}
+
 export interface PairRuntimeState {
   pair: string;
   lastSeenAt: number;

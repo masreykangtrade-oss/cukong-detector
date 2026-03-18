@@ -1,0 +1,47 @@
+{
+  "summary": "Backend-only re-audit for P0 Indodax v2 mode wiring, env-driven callback server, nginx renderer, lifecycle integration, and runtime regression completed. lint/build and all targeted probes passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/runtime_backend_regression.ts",
+    "/app/tests/worker_timeout_probe.ts",
+    "/app/tests/live_execution_hardening_probe.ts",
+    "/app/tests/execution_summary_failed_probe.ts",
+    "/app/tests/telegram_menu_navigation_probe.ts",
+    "/app/tests/telegram_slippage_confirmation_probe.ts",
+    "/app/tests/indodax_history_v2_probe.ts",
+    "/app/tests/private_api_v2_mapping_probe.ts",
+    "/app/tests/http_servers_probe.ts",
+    "/app/tests/nginx_renderer_probe.ts",
+    "/app/tests/app_lifecycle_servers_probe.ts"
+  ],
+  "action_items": [
+    "Keep indodax_history_v2_probe.ts and private_api_v2_mapping_probe.ts as mandatory regression gates for INDODAX_HISTORY_MODE behavior.",
+    "Keep http_servers_probe.ts and app_lifecycle_servers_probe.ts in CI to protect callback/app startup-shutdown integration and env wiring.",
+    "Plan modular split of executionEngine.ts (>700 lines) after P0 hardening to reduce regression blast radius."
+  ],
+  "critical_code_review_comments": [
+    "executionEngine.ts remains very large (1500+ lines), combining reconciliation, execution, and summary side-effects in one class; high regression risk for future P0 changes.",
+    "No blocking mismatch found between README/.env.example/REFACTOR_LOG.md/SESSION_CONTEXT_NEXT.md and current implementation for this scope."
+  ],
+  "updated_files": [
+    "/app/tests/app_lifecycle_servers_probe.ts",
+    "/app/test_reports/iteration_9.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (skipped by request)"
+  },
+  "seed_data_creation": "No persistent seed data. Isolated DATA_DIR under /tmp used per probe run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed and passed with TELEGRAM_BOT_TOKEN=testtoken and TELEGRAM_ALLOWED_USER_IDS=1: yarn lint, yarn build, runtime_backend_regression, worker_timeout_probe, live_execution_hardening_probe, execution_summary_failed_probe, telegram_menu_navigation_probe, telegram_slippage_confirmation_probe, indodax_history_v2_probe, private_api_v2_mapping_probe, http_servers_probe, nginx_renderer_probe, and new app_lifecycle_servers_probe. NOTE: several probes use MOCKED exchange/Telegram harnesses by design; http_servers/nginx renderer probes use real local HTTP process behavior.",
+  "rca of the issue": "No blocker reproduced in this iteration. P0 wiring validated: v2 method availability + mode-based caller selection, callback env-drive + health + persistence, startup/shutdown connectivity, and nginx env rendering all behaved as expected in local probe scope."
+}

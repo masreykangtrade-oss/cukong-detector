@@ -2,10 +2,14 @@ import path from 'node:path';
 
 export type TradingMode = 'OFF' | 'ALERT_ONLY' | 'SEMI_AUTO' | 'FULL_AUTO';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type IndodaxHistoryMode = 'v2_prefer' | 'v2_only' | 'legacy';
 
 export interface EnvConfig {
   nodeEnv: string;
   appName: string;
+  publicBaseUrl: string;
+  appPort: number;
+  appBindHost: string;
 
   telegramToken: string;
   telegramAllowedUserIds: number[];
@@ -34,12 +38,21 @@ export interface EnvConfig {
   patternOutcomesFile: string;
   executionSummaryFile: string;
   tradeOutcomeFile: string;
+  callbackEventsFile: string;
+  callbackStateFile: string;
 
   backtestDir: string;
 
   indodaxPublicBaseUrl: string;
   indodaxPrivateBaseUrl: string;
   indodaxTimeoutMs: number;
+  indodaxHistoryMode: IndodaxHistoryMode;
+  indodaxCallbackPath: string;
+  indodaxCallbackPort: number;
+  indodaxCallbackBindHost: string;
+  indodaxCallbackAllowedHost: string;
+  indodaxEnableCallbackServer: boolean;
+  indodaxCallbackUrl: string | null;
 
   pollingIntervalMs: number;
   marketWatchIntervalMs: number;
@@ -75,6 +88,40 @@ function readString(name: string, fallback = ''): string {
     return fallback;
   }
   return value.trim();
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+function normalizePath(value: string, fallback: string): string {
+  const candidate = value.trim() || fallback;
+  const withLeadingSlash = candidate.startsWith('/') ? candidate : `/${candidate}`;
+  return withLeadingSlash.length > 1 ? withLeadingSlash.replace(/\/+$/, '') : withLeadingSlash;
+}
+
+function deriveHostFromUrl(value: string): string {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    return new URL(value).host;
+  } catch {
+    return '';
+  }
+}
+
+function deriveCallbackUrl(publicBaseUrl: string, callbackPath: string): string | null {
+  if (!publicBaseUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(callbackPath, `${normalizeBaseUrl(publicBaseUrl)}/`).toString();
+  } catch {
+    return null;
+  }
 }
 
 function readRequiredString(name: string): string {
@@ -158,10 +205,13 @@ function readNumberList(name: string): number[] {
 
 const tradingModes = ['OFF', 'ALERT_ONLY', 'SEMI_AUTO', 'FULL_AUTO'] as const;
 const logLevels = ['debug', 'info', 'warn', 'error'] as const;
+const historyModes = ['v2_prefer', 'v2_only', 'legacy'] as const;
 
 const rootDataDir = readString('DATA_DIR', path.resolve(process.cwd(), 'data'));
 const rootLogDir = readString('LOG_DIR', path.resolve(process.cwd(), 'logs'));
 const rootTempDir = readString('TEMP_DIR', path.resolve(process.cwd(), 'tmp'));
+const publicBaseUrl = normalizeBaseUrl(readString('PUBLIC_BASE_URL', ''));
+const indodaxCallbackPath = normalizePath(readString('INDODAX_CALLBACK_PATH', '/indodax/callback'), '/indodax/callback');
 
 const accountsDir = path.resolve(rootDataDir, 'accounts');
 const stateDir = path.resolve(rootDataDir, 'state');
@@ -171,6 +221,9 @@ const backtestDir = path.resolve(rootDataDir, 'backtest');
 export const env: EnvConfig = {
   nodeEnv: readString('NODE_ENV', 'development'),
   appName: readString('APP_NAME', 'mafiamarkets'),
+  publicBaseUrl,
+  appPort: readNumber('APP_PORT', 8787),
+  appBindHost: readString('APP_BIND_HOST', '0.0.0.0'),
 
   telegramToken: readRequiredString('TELEGRAM_BOT_TOKEN'),
   telegramAllowedUserIds: readNumberList('TELEGRAM_ALLOWED_USER_IDS'),
@@ -199,6 +252,8 @@ export const env: EnvConfig = {
   patternOutcomesFile: path.resolve(historyDir, 'pattern-outcomes.jsonl'),
   executionSummaryFile: path.resolve(historyDir, 'execution-summaries.jsonl'),
   tradeOutcomeFile: path.resolve(historyDir, 'trade-outcomes.jsonl'),
+  callbackEventsFile: path.resolve(historyDir, 'indodax-callback-events.jsonl'),
+  callbackStateFile: path.resolve(stateDir, 'indodax-callback-state.json'),
 
   backtestDir,
 
@@ -211,6 +266,16 @@ export const env: EnvConfig = {
     'https://indodax.com/tapi',
   ),
   indodaxTimeoutMs: readNumber('INDODAX_TIMEOUT_MS', 15_000),
+  indodaxHistoryMode: readStringEnum('INDODAX_HISTORY_MODE', historyModes, 'v2_prefer'),
+  indodaxCallbackPath,
+  indodaxCallbackPort: readNumber('INDODAX_CALLBACK_PORT', 8788),
+  indodaxCallbackBindHost: readString('INDODAX_CALLBACK_BIND_HOST', '0.0.0.0'),
+  indodaxCallbackAllowedHost: readString(
+    'INDODAX_CALLBACK_ALLOWED_HOST',
+    deriveHostFromUrl(publicBaseUrl),
+  ),
+  indodaxEnableCallbackServer: readBoolean('INDODAX_ENABLE_CALLBACK_SERVER', false),
+  indodaxCallbackUrl: deriveCallbackUrl(publicBaseUrl, indodaxCallbackPath),
 
   pollingIntervalMs: readNumber('POLLING_INTERVAL_MS', 5_000),
   marketWatchIntervalMs: readNumber('MARKET_WATCH_INTERVAL_MS', 10_000),
@@ -246,4 +311,17 @@ export const env: EnvConfig = {
 
 export function isProductionEnv(): boolean {
   return env.nodeEnv === 'production';
+}
+
+export function getIndodaxHistoryMode(): IndodaxHistoryMode {
+  const raw = readString('INDODAX_HISTORY_MODE');
+  if (!raw) {
+    return env.indodaxHistoryMode;
+  }
+
+  if ((historyModes as readonly string[]).includes(raw)) {
+    return raw as IndodaxHistoryMode;
+  }
+
+  throw new Error(`Invalid value for INDODAX_HISTORY_MODE: "${raw}"`);
 }

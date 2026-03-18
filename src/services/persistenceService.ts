@@ -7,6 +7,8 @@ import type {
   ExecutionSummary,
   HealthSnapshot,
   HotlistEntry,
+  IndodaxCallbackEvent,
+  IndodaxCallbackState,
   JournalEntry,
   OpportunityAssessment,
   OrderRecord,
@@ -116,6 +118,21 @@ export function createDefaultHealth(): HealthSnapshot {
   };
 }
 
+export function createDefaultIndodaxCallbackState(): IndodaxCallbackState {
+  return {
+    enabled: env.indodaxEnableCallbackServer,
+    callbackPath: env.indodaxCallbackPath,
+    callbackUrl: env.indodaxCallbackUrl,
+    allowedHost: env.indodaxCallbackAllowedHost || null,
+    lastReceivedAt: null,
+    lastResponse: null,
+    acceptedCount: 0,
+    rejectedCount: 0,
+    lastEventId: null,
+    lastSourceHost: null,
+  };
+}
+
 export class PersistenceService {
   private readonly stateStore = new JsonStore<RuntimeState>({
     filePath: env.stateFile,
@@ -130,6 +147,10 @@ export class PersistenceService {
   private readonly healthStore = new JsonStore<HealthSnapshot>({
     filePath: env.healthFile,
     fallback: createDefaultHealth(),
+  });
+  private readonly callbackStateStore = new JsonStore<IndodaxCallbackState>({
+    filePath: env.callbackStateFile,
+    fallback: createDefaultIndodaxCallbackState(),
   });
 
   private readonly ordersStore = new JsonStore<OrderRecord[]>({
@@ -163,12 +184,16 @@ export class PersistenceService {
   private readonly tradeOutcomeStore = new JsonLinesStore<TradeOutcomeSummary>(
     env.tradeOutcomeFile,
   );
+  private readonly callbackEventsStore = new JsonLinesStore<IndodaxCallbackEvent>(
+    env.callbackEventsFile,
+  );
 
   async bootstrap(): Promise<void> {
     await Promise.all([
       this.stateStore.read(),
       this.settingsStore.read(),
       this.healthStore.read(),
+      this.callbackStateStore.read(),
       this.ordersStore.read(),
       this.positionsStore.read(),
       this.tradesStore.read(),
@@ -178,6 +203,7 @@ export class PersistenceService {
       this.patternOutcomesStore.ensureDir(),
       this.executionSummaryStore.ensureDir(),
       this.tradeOutcomeStore.ensureDir(),
+      this.callbackEventsStore.ensureDir(),
     ]);
   }
 
@@ -229,6 +255,14 @@ export class PersistenceService {
       ...health,
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  readIndodaxCallbackState(): Promise<IndodaxCallbackState> {
+    return this.callbackStateStore.read();
+  }
+
+  saveIndodaxCallbackState(state: IndodaxCallbackState): Promise<void> {
+    return this.callbackStateStore.write(state);
   }
 
   readOrders(): Promise<OrderRecord[]> {
@@ -301,6 +335,14 @@ export class PersistenceService {
 
   readTradeOutcomes(): Promise<TradeOutcomeSummary[]> {
     return this.tradeOutcomeStore.readAll();
+  }
+
+  appendIndodaxCallbackEvent(entry: IndodaxCallbackEvent): Promise<void> {
+    return this.callbackEventsStore.append(entry);
+  }
+
+  readIndodaxCallbackEvents(): Promise<IndodaxCallbackEvent[]> {
+    return this.callbackEventsStore.readAll();
   }
 
   async saveHotlistSnapshot(hotlist: HotlistEntry[]): Promise<void> {
