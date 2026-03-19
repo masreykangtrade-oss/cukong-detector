@@ -1,7 +1,7 @@
 Lakukan AUDIT FORENSIK ULANG terhadap repo ini, TANPA REFACTOR, TANPA IMPLEMENTASI, TANPA PATCH, TANPA MENGUBAH FILE.
 
 Repository:
-https://github.com/bcbcrey-hue/cukong-markets/tree/main
+https://github.com/bcbcrey-hue/cukong-markets
 
 TUJUAN:
 Saya ingin audit keras yang jujur untuk memverifikasi apakah klaim arsitektur dan fitur berikut benar-benar ADA dan benar-benar TERHUBUNG di source code saat ini, bukan sekadar ada file, interface, blueprint, README, atau kontrak yang terlihat bagus.
