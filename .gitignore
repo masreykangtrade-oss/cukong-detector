@@ -9,3 +9,7 @@ node_modules/
 data/
 logs/
 tmp/
+-e 
+# Environment files
+*.env
+*.env.*
