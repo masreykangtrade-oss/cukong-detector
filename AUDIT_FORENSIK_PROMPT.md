@@ -191,6 +191,10 @@ Saya curiga ada klaim execution/recovery yang dioverclaim.
 Verifikasi dengan keras apakah ada pemanggilan method di runtime utama yang implementasinya tidak ada atau tidak match, terutama di hubungan:
 - src/app.ts
 - src/domain/trading/executionEngine.ts
+- apakah src/app.ts memanggil method execution yang tidak ditemukan implementasinya
+- apakah recovery startup benar-benar nyata atau hanya diklaim
+- apakah position-monitor benar-benar berjalan end-to-end
+- apakah evaluate open positions benar-benar terhubung
 
 Kalau ada mismatch seperti method dipanggil tapi tidak ditemukan, itu wajib ditulis eksplisit dan dijadikan bukti bahwa claim terkait belum valid.
 
