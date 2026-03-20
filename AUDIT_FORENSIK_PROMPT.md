@@ -1,115 +1,125 @@
-Berikut daftar tegas yang saya perintahkan **wajib diperbaiki** dari hasil audit source.
+Next focus yang relevan:
+1) selaraskan deploy/infrastructure agar domain publik benar-benar memakai runtime repo ini
+2) tambah probe integrasi bootstrap penuh yang menyatukan app start → /healthz → callback → recovery → status report sebagai satu smoke test
+3) bila perlu, sederhanakan compatibility layer legacy + V2 setelah jalur live publik benar-benar stabil
 
-Catatan jujur dulu: daftar ini sudah berbasis file inti runtime/trading/Telegram/HTTP/persistence/tests yang berhasil saya audit langsung, tetapi **belum bisa saya klaim 100% seluruh tree repo tanpa sisa** karena listing rekursif repo dari connector tidak lengkap. Jadi ini adalah **daftar aktual dan keras dari area yang sudah terbukti paling load-bearing**. harap kamu audit lagi sebelum melakukan implementasi di bawah ini:
+TUJUAN UTAMA:
+Lakukan implementasi nyata agar jalur execution/recovery TIDAK LAGI PARSIAL dalam konteks migrasi history/recovery Indodax.
 
-## File yang sudah saya audit langsung
+DEFINISI "TIDAK PARSIAL" YANG DIMAKSUD:
+- Recovery dan reconciliation order/fill/history TIDAK BOLEH lagi hybrid legacy + V2.
+- Untuk kebutuhan history/recovery:
+  - order history HARUS memakai GET /api/v2/order/histories
+  - trade history HARUS memakai GET /api/v2/myTrades
+- Runtime path untuk history/recovery tidak boleh fallback lagi ke legacy orderHistory / tradeHistory.
+- Jangan overclaim migrasi penuh seluruh private API bila docs resmi belum mendukung itu.
 
-Root/docs/config:
-`README.md`, `REFACTOR_LOG.md`, `SESSION_CONTEXT_NEXT.md`, `cukong-markets-blueprint.md`, `package.json`, `tsconfig.json`, `scripts/render-nginx-conf.mjs`
+BATASAN WAJIB:
+1. JANGAN refactor besar yang tidak perlu.
+2. JANGAN ubah Telegram UX/menu yang sudah ada kecuali diperlukan untuk wiring status/config.
+3. JANGAN hapus method private API legacy lain yang masih resmi dan masih dipakai sah menurut docs, seperti:
+   - trade
+   - openOrders
+   - getOrder
+   - cancelOrder
+   Kecuali kamu menemukan bukti resmi yang lebih baru di docs bahwa method itu juga harus dipindahkan.
+4. Fokuskan migrasi hanya pada jalur history/recovery/reconcile agar verdict parsial bisa hilang secara jujur.
+5. Jangan memberi klaim “full V2 migration” untuk seluruh stack trading jika yang selesai hanya history/recovery.
+6. Gunakan source repo aktual dan docs resmi sebagai sumber kebenaran. Jangan mengada-ada endpoint yang tidak ada di docs.
 
-Runtime/core/services:
-`src/bootstrap.ts`, `src/app.ts`, `src/config/env.ts`, `src/core/scheduler.ts`, `src/core/shutdown.ts`, `src/core/types.ts`, `src/storage/jsonStore.ts`, `src/services/persistenceService.ts`, `src/services/stateService.ts`, `src/services/healthService.ts`, `src/services/journalService.ts`, `src/services/reportService.ts`, `src/services/summaryService.ts`, `src/services/pollingService.ts`
+FAKTA RESMI YANG WAJIB DIIKUTI:
+- orderHistory legacy dipindah ke GET /api/v2/order/histories
+- tradeHistory legacy dipindah ke GET /api/v2/myTrades
+- docs resmi V2 order history mendukung parameter:
+  symbol, startTime, endTime, limit, sort
+- docs resmi V2 trade history mendukung parameter:
+  symbol, orderId, startTime, endTime, limit, sort
+- default range V2 adalah 24 jam terakhir bila startTime/endTime tidak dikirim
+- maksimum range per request adalah 7 hari
 
-Accounts/settings/trading:
-`src/domain/accounts/accountStore.ts`, `accountRegistry.ts`, `accountValidator.ts`, `src/domain/settings/settingsService.ts`, `src/domain/trading/orderManager.ts`, `positionManager.ts`, `riskEngine.ts`, `executionEngine.ts`
+AUDIT MASALAH NYATA YANG HARUS KAMU VERIFIKASI DAN PERBAIKI:
+1. ExecutionEngine saat ini masih partial karena recovery memelihara compatibility legacy + V2.
+2. orderHistoriesV2 di repo harus dipastikan dipakai sebagai jalur canonical untuk order history recovery.
+3. Jangan andalkan query default 24 jam untuk recovery order history.
+4. Karena docs V2 order history TIDAK mendukung orderId filter sebagai parameter resmi, implementasikan strategi pencarian yang benar:
+   - gunakan symbol wajib
+   - gunakan startTime/endTime windowed search
+   - lakukan pencarian bertahap per chunk <= 7 hari
+   - cocokkan hasil berdasarkan order.exchangeOrderId / clientOrderId / timestamp / pair secara deterministik
+5. myTradesV2 boleh memakai symbol + orderId bila tersedia, sesuai docs.
+6. Semua fallback runtime ke legacy tradeHistory / orderHistory harus dihapus dari execution/recovery path utama.
+7. Mode history env tidak boleh lagi membuat runtime utama hybrid. Jika perlu:
+   - jadikan v2_only sebagai mode default/final
+   - atau hilangkan branching legacy dari runtime path production
+   - tetapi jangan sampai merusak backward compatibility yang tidak relevan dengan history migration
 
-Telegram/HTTP/Indodax:
-`src/integrations/telegram/bot.ts`, `handlers.ts`, `uploadHandler.ts`, `auth.ts`, `callbackRouter.ts`, `src/integrations/indodax/callbackServer.ts`, `src/server/appServer.ts`
+SELALU CEK SEMUA FILE YANG WAJIB DIAUDIT DAN DIPERBAIKI:
 
-Probe yang saya baca:
-`tests/http_servers_probe.ts`, `tests/telegram_menu_navigation_probe.ts`, `tests/live_execution_hardening_probe.ts`
+HASIL IMPLEMENTASI YANG WAJIB ADA:
+A. Private API wrapper
+- orderHistoriesV2 harus mengikuti docs resmi V2 secara ketat
+- myTradesV2 harus mengikuti docs resmi V2 secara ketat
+- signing/header/query untuk V2 harus tetap benar
+- normalizer response harus kompatibel dengan payload resmi V2 tanpa menebak-nebak field yang tidak perlu
 
-## Daftar semua yang harus diperbaiki agar benar-benar siap live
+B. Execution / recovery
+- loadTradeStats harus canonical ke V2
+- loadOrderHistorySnapshot harus canonical ke V2
+- fallback legacy history harus dihapus dari jalur runtime utama
+- reconcile startup, sync live order, callback-triggered reconcile, dan post-restart recovery harus tetap jalan
+- partial fill, weighted average fill, fee, dan position updates tetap benar
 
-### P0 — wajib beres sebelum repo boleh dibilang siap live
+C. Windowed search yang benar untuk order history V2
+- jangan query order history V2 hanya dengan symbol + limit lalu berharap order lama ketemu
+- implementasikan pencarian berbasis waktu dari sekitar submit_time / createdAt order lokal
+- bila waktu pasti tidak tersedia, gunakan fallback pencarian bertahap yang bounded dan deterministic
+- setiap request maksimum 7 hari sesuai docs
+- hentikan pencarian saat order target sudah ditemukan
+- beri logging/journal yang jelas bila order tetap tidak ditemukan
 
-1. **Pisahkan dengan tegas status “LIVE” vs “SIMULATED”, lalu tampilkan di health dan Telegram.**
-   Ini blocker paling serius. Default settings saat ini masih `dryRun: true` dan `paperTrade: true`, sementara engine akan tetap simulasi bila `uiOnly`, `dryRun`, atau `paperTrade` aktif. Tetapi status runtime/health yang ditampilkan ke operator hanya melihat `tradingMode !== OFF` dan emergency stop, bukan mode eksekusi riil. Akibatnya operator bisa melihat “trading on” padahal bot masih simulasi. Itu sangat berbahaya untuk live-readiness. Perbaikan minimal: tambahkan field eksplisit seperti `executionMode: SIMULATED | LIVE`, tampilkan di `/healthz`, Telegram status, dan log startup.    
+D. Konfigurasi
+- ubah default agar runtime tidak lagi hybrid legacy+V2 untuk history
+- bila env INDODAX_HISTORY_MODE masih dipertahankan, pastikan:
+  - default final adalah non-partial
+  - mode legacy tidak lagi jadi jalur normal yang diandalkan
+  - dokumentasi menjelaskan status sebenarnya dengan jujur
 
-2. **Buat jalur resmi untuk mengubah bot dari simulasi ke live.**
-   Saat ini yang terlihat di Telegram handler hanya pengaturan `trading mode`, `buy slippage`, dan `take profit`. Dari wiring yang saya audit, tidak ada jalur operator yang jelas untuk mematikan `dryRun`, `paperTrade`, dan `uiOnly`. Kalau memang live mode harus bisa dioperasikan nyata, harus ada satu jalur resmi: lewat env, file settings, atau menu Telegram admin—dan harus tervalidasi jelas. Tanpa itu, klaim “siap live” masih belum bersih.    
+E. Dokumentasi
+- Perbarui README.md dan dokumen terkait agar sinkron dengan source code terbaru. Source code tetap sumber kebenaran utama; dokumen hanya boleh merefleksikan kondisi source yang nyata.
+- Perbarui dan bersihkan `AUDIT_FORENSIK_PROMPT.md`, `REFACTOR_LOG.md`, dan `SESSION_CONTEXT_NEXT.md` secara terarah agar sinkron dengan hasil kerja nyata dan mudah dijadikan acuan sesi berikutnya.
+- JANGAN menambahkan isi baru di atas isi lama yang bertabrakan; sinkronkan setiap dokumen agar tetap konsisten dan mudah dipakai pada sesi selanjutnya.
+- Acuan perbaikan sesi berikutnya harus terutama disinkronkan ke `REFACTOR_LOG.md` dan `SESSION_CONTEXT_NEXT.md`. `AUDIT_FORENSIK_PROMPT.md` harus tetap dijaga sebagai target/checklist utama, bukan dump catatan sesi.
+- Perbarui `cukong-markets-blueprint.md` hanya jika memang perlu, agar tidak overclaim dan tetap jujur.
+- Jangan mengubah dokumen hanya demi kosmetik. Semua perubahan dokumen harus jujur, faktual, dan sinkron dengan tindakan serta hasil implementasi nyata.
+- jelaskan secara eksplisit bahwa:
+  - migrasi yang diselesaikan adalah history/recovery ke V2
+  - method lain seperti trade/openOrders/getOrder/cancelOrder masih tetap memakai jalur resmi yang masih didokumentasikan
 
-3. **Perbaiki README dan logika verifikasi publik untuk callback.**
-   README sekarang memakai respons `405` pada `/indodax/callback` sebagai indikasi bahwa domain publik belum mengarah ke runtime repo ini. Itu salah kaprah, karena callback server di source memang sengaja mengembalikan `405 fail` untuk method selain `POST`. Jadi verifikasi publik callback harus diubah: jangan pakai `GET`, tetapi pakai `POST` dengan host/header yang sesuai. Kalau dokumentasi ini dibiarkan, operator bisa salah diagnosa deploy.   
+F. Test / probe
+Tambahkan atau perbaiki test/probe yang membuktikan:
+- recovery order history V2 bekerja untuk order > 24 jam
+- recovery order history V2 tetap bekerja untuk order > 7 hari melalui chunked lookup
+- myTradesV2 + orderId dipakai benar
+- startup recovery tidak lagi membutuhkan legacy orderHistory/tradeHistory
+- callback reconcile tetap hidup
+- compile/build/probe lulus
 
-4. **Pastikan `.env.example` benar-benar ada, sinkron, dan bisa dipakai onboarding/deploy.**
-   README menjadikan `.env.example` sebagai langkah utama onboarding (`cp .env.example .env`), tetapi dalam audit ini file itu tidak berhasil saya verifikasi dari branch `main`. Jadi ini harus dianggap blocker dokumentasi-operasional sampai terbukti ada dan sinkron dengan `env.ts`. Jangan biarkan README menyuruh memakai file yang tidak benar-benar tersedia atau sudah tidak sinkron. `env.ts` sendiri punya kontrak env yang cukup banyak dan spesifik, jadi contoh env harus nyata, lengkap, dan sesuai.  
+ATURAN EKSEKUSI:
+- Audit keras source aktual dulu.
+- Langsung implementasikan perbaikan nyata.
+- Jangan berhenti di analisis.
+- Jangan minta konfirmasi lanjutan.
+- Jangan membuat placeholder atau TODO.
+- Jangan meninggalkan jalur setengah jadi.
+- Bila ada mismatch antara source dan docs, ikuti docs resmi dan perbaiki source.
+- Bila ada area yang tidak bisa dimigrasikan penuh karena docs resmi belum menyediakan endpoint pengganti, tulis jujur dan JANGAN memaksa migrasi palsu.
 
-5. **Tambahkan jalur validasi resmi repo untuk probes/tests, bukan daftar manual.**
-   Saat ini `package.json` hanya punya `build`, `dev`, `render:nginx`, `start`, dan `lint`, sedangkan `tsconfig.json` hanya meng-include `src/**/*.ts`. Jadi probe di `tests/**/*.ts` tidak otomatis ikut typecheck/lint normal repo, walaupun README mengklaim banyak probe penting tersedia. Untuk repo yang ingin disebut siap live, harus ada minimal satu jalur resmi seperti `yarn test:probes` atau `yarn verify`, dan idealnya file test/probe ikut typechecked lewat tsconfig terpisah atau include yang jelas.   
-
-6. **Tambahkan probe callback-driven reconciliation yang benar-benar menembus `order_id/orderId/id -> reconcileFromCallback()`.**
-   Wiring callback ke execution memang ada: callback accepted akan mengambil `order_id/orderId/id` lalu memanggil reconciliation order aktif. Tetapi dari probe yang saya audit langsung, yang benar-benar dites baru health/callback acceptance dan execution hardening umum; saya belum melihat probe end-to-end yang memastikan payload callback real benar-benar mengubah state order yang aktif. Untuk live trading, ini wajib.    
-
-### P1 — sangat penting untuk kestabilan operasional
-
-7. **Perbaiki bug metrik `activeJobs` di `PollingService`.**
-   `LightScheduler.list()` sudah menyimpan status `active` per job, tetapi `PollingService.stats()` mengembalikan `activeJobs: jobs.length`, jadi angka job aktif bisa salah walaupun polling sedang stop. Ini kelihatannya kecil, tapi bisa merusak health/observability dan membuat operator salah membaca runtime. Perbaikan minimal: hitung `activeJobs` dari `jobs.filter(job => job.active).length`.  
-
-8. **Tentukan satu source of truth untuk interval scanner/polling, lalu wire secara konsisten.**
-   `env.ts` dan `ScannerSettings` punya `pollingIntervalMs` dan `marketWatchIntervalMs`, tetapi di wiring `app.ts` job `market-scan` didaftarkan langsung memakai `env.pollingIntervalMs`. Dari jalur yang saya audit, belum terlihat pemakaian operasional yang tegas untuk `settings.scanner.marketWatchIntervalMs`. Ini membingungkan dan berpotensi bikin operator merasa setting berubah padahal scheduler tetap jalan dengan nilai lain. Pilih satu sumber kebenaran dan rapikan.    
-
-9. **Perbaiki contract `manualOrder()` untuk BUY.**
-   Di jalur generic `manualOrder()`, notional buy dihitung dari `(request.price ?? 0) * request.quantity`. Itu artinya kalau `price` kosong, notional bisa jadi nol dan flow menjadi tidak sehat. Memang Telegram manual buy saat ini tidak memakai method itu secara langsung, tetapi method publik seperti ini tetap harus dibersihkan supaya contract-nya tidak menyesatkan. 
-
-10. **Samakan naming artifact deploy dengan branding final repo.**
-    Branding final yang tertulis adalah `cukong-markets`, tetapi renderer nginx masih memakai path/template/output bernama `mafiamarkets.nginx.conf`. Ini bukan blocker correctness, tetapi jelas berpotensi bikin deploy/operator bingung, apalagi kalau ada lebih dari satu repo atau artefak lama di server. Rapikan naming agar satu bahasa dari package name sampai deploy artifact.  
-
-### P2 — penting untuk kejujuran status dan maintainability live
-
-11. **Rapikan klaim dokumentasi agar selalu mengikuti source, bukan sebaliknya.**
-    Secara source, repo ini memang nyata dan banyak wiring penting sudah hidup. Tetapi README dan log dokumennya masih cenderung terlalu percaya diri di beberapa kalimat. Untuk repo yang mau dijadikan source of truth internal, dokumentasi harus “lebih hati-hati daripada source”, bukan lebih berani. Fokusnya: tulis apa yang benar-benar terbukti, apa yang masih parsial, dan apa yang belum bisa dibuktikan dari deploy publik.   
-
-12. **Tambahkan satu probe “live-readiness smoke test” yang menyatukan jalur utama.**
-    Repo ini sudah punya probe yang terpisah-pisah untuk HTTP server, Telegram navigation, dan execution hardening. Langkah berikutnya yang layak adalah satu smoke test yang memastikan bootstrap → app start → `/healthz` → callback acceptance → startup recovery → status report berjalan konsisten sebagai satu paket. Ini penting agar “siap live” tidak hanya hasil menjumlahkan probe terpisah.     
-
-## Ringkasan paling tegas
-
-1. **Jangan biarkan status bot bilang trading aktif kalau engine masih simulasi.**
-2. **Sediakan jalur resmi untuk mengubah mode simulasi ke live.**
-3. **Betulkan README dan SOP verifikasi callback publik.**
-4. **Pastikan `.env.example` nyata dan sinkron.**
-5. **Resmikan jalur `verify/test/probe` repo.**
-6. **Tambahkan probe callback reconciliation end-to-end.**
-7. **Perbaiki observability kecil yang menyesatkan seperti `activeJobs`.**
-8. **Rapikan source-of-truth interval scheduler dan contract manual order.**
-
-## Verdict akhir saat ini
-
-
-## Status penutupan target utama setelah implementasi
-
-### P0
-
-- [x] **LIVE vs SIMULATED dipisahkan tegas** — `executionMode` sekarang tampil di `/healthz`, Telegram status, dan log startup.
-- [x] **Jalur resmi simulasi ↔ live tersedia** — Telegram `Settings -> Strategy Settings -> Execution Simulated / Execution Live` sekarang benar-benar mematikan/menyalakan `dryRun`, `paperTrade`, dan `uiOnly`.
-- [x] **README verifikasi callback publik diperbaiki** — verifikasi resmi sekarang memakai `POST`, bukan `GET 405`.
-- [x] **`.env.example` nyata dan sinkron** — file sekarang ada dan mengikuti kontrak `env.ts` yang benar-benar dipakai.
-- [x] **Jalur validasi resmi repo ada** — `yarn typecheck:probes`, `yarn test:probes`, dan `yarn verify` sekarang tersedia.
-- [x] **Probe callback reconciliation end-to-end ada** — `tests/callback_reconciliation_probe.ts` sekarang membuktikan jalur `order_id/orderId/id -> reconcileFromCallback()`.
-
-### P1
-
-- [x] **Bug `activeJobs` diperbaiki** — `PollingService.stats()` sekarang menghitung job aktif dari `job.active`.
-- [x] **Source of truth interval dirapikan** — `market-scan` memakai `settings.scanner.marketWatchIntervalMs`, sedangkan polling runtime memakai `settings.scanner.pollingIntervalMs`.
-- [x] **Contract `manualOrder()` BUY diperbaiki** — request BUY tanpa `price` valid sekarang ditolak tegas.
-- [x] **Naming artifact deploy disamakan** — renderer nginx sekarang sinkron ke `deploy/nginx/cukong-markets.nginx.conf`.
-
-### P2
-
-- [x] **Dokumentasi disinkronkan ke source nyata** — `README.md`, `REFACTOR_LOG.md`, dan `SESSION_CONTEXT_NEXT.md` sekarang mengikuti status source dan hasil validasi terbaru.
-- [ ] **Smoke test terpadu tunggal** — belum ada satu probe bootstrap penuh yang menyatukan semua flow utama menjadi satu paket; ini tetap backlog jujur.
-
-### Validasi nyata tambahan
-
-- `yarn lint`
-- `yarn typecheck:probes`
-- `yarn build`
-- `yarn test:probes`
-- live round-trip nyata via `ExecutionEngine`: BUY lalu SELL `xrp_idr` selesai `CONFIRMED_LIVE`
-- verifikasi publik terbaru tetap menunjukkan `https://kangtrade.top/healthz` bukan runtime repo ini, dan `POST https://kangtrade.top/indodax/callback` masih mengembalikan `fail`
-
-### Status jujur saat ini
-
-- **repo internal + integrasi exchange live:** implemented & connected
-- **deploy/inbound publik di `kangtrade.top`:** blocked / not proven dari source repo ini
+FORMAT OUTPUT YANG SAYA MAU:
+1. Audit singkat tapi tegas: kenapa sebelumnya masih parsial.
+2. File apa saja yang diubah dan kenapa.
+3. Implementasi apa yang benar-benar diselesaikan.
+4. Bukti bahwa recovery/history sekarang non-parsial.
+5. Hal apa yang memang masih tetap memakai /tapi dan kenapa itu masih benar menurut docs resmi.
+6. Verdict final tegas salah satu:
+   - NON-PARSIAL UNTUK HISTORY/RECOVERY DAN SIAP DIPAKAI
+   - MASIH PARSIAL
