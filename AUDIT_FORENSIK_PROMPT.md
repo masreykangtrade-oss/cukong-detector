@@ -3,9 +3,6 @@ Gunakan repository source code aktual sebagai sumber kebenaran utama.
 Repository:
 https://github.com/masreykangtrade-oss/cukong-markets
 
-Dokumen target cheklist/implementasi:
-- https://github.com/masreykangtrade-oss/cukong-markets/blob/main/AUDIT_FORENSIK_PROMPT.md
-
 Dokumentasi resmi WAJIB yang menjadi sumber kebenaran eksternal:
 - https://github.com/btcid/indodax-official-api-docs/blob/master/INDODAX-TradeAPI-2.md
 - https://github.com/btcid/indodax-official-api-docs/blob/master/Private-RestAPI.md
@@ -19,10 +16,9 @@ Dokumen referensi tambahan, BUKAN sumber kebenaran utama:
 HIERARKI KEBENARAN WAJIB:
 1. Source code repo saat ini = sumber kebenaran utama
 2. Dokumentasi resmi Indodax = sumber kebenaran eksternal resmi
-3. AUDIT_FORENSIK_PROMPT.md = target audit/implementasi, bukan pengganti source code runtime
-4. REFACTOR_LOG.md, SESSION_CONTEXT_NEXT.md, README.md, blueprint = referensi tambahan
-5. Jika dokumen bertentangan dengan source code aktual, menangkan source code
-6. Jika source code bertentangan dengan dokumentasi resmi Indodax untuk endpoint API yang sedang dimigrasikan, ikuti dokumentasi resmi Indodax lalu perbaiki source code
+3. REFACTOR_LOG.md, SESSION_CONTEXT_NEXT.md, README.md, blueprint = referensi tambahan
+4. Jika dokumen bertentangan dengan source code aktual, menangkan source code
+5. Jika source code bertentangan dengan dokumentasi resmi Indodax untuk endpoint API yang sedang dimigrasikan, ikuti dokumentasi resmi Indodax lalu perbaiki source code
 
 TUJUAN UTAMA:
 Lakukan audit keras source aktual lalu langsung implementasikan perbaikan nyata agar jalur execution/recovery TIDAK LAGI PARSIAL dalam konteks migrasi history/recovery Indodax.
@@ -38,7 +34,7 @@ DEFINISI TIDAK PARSIAL YANG DIMAKSUD:
 BATASAN WAJIB:
 1. JANGAN refactor besar yang tidak perlu
 2. JANGAN ubah Telegram UX/menu kecuali jika memang diperlukan untuk wiring status/config
-3. JANGAN hapus atau migrasikan paksa method private API berikut selama dokumentasi resmi masih menyatakannya valid:
+3. JANGAN hapus, nonaktifkan, atau memaksa migrasi method private API berikut selama dokumentasi resmi masih menyatakannya valid:
    - trade
    - openOrders
    - getOrder
