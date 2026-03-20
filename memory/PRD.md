@@ -1,61 +1,43 @@
-# PRD — cukong-markets audit & final sync
+# PRD
 
 ## Original Problem Statement
-User meminta audit keras per-file untuk seluruh repo `https://github.com/bcbcrey-hue/cukong-markets`, lalu melakukan perbaikan nyata hanya bila diperlukan agar:
-- seluruh modul besar yang diklaim di dokumen benar-benar terhubung nyata,
-- seluruh status di dokumen menjadi jujur, konsisten, final, dan siap dipakai sebagai konteks sesi berikutnya,
-- tidak ada campur aduk status lama vs status terbaru,
-- tidak ada overclaim, placeholder palsu, dummy wiring, atau klaim “sudah” padahal belum nyambung.
-
-Urutan kerja yang diminta:
-1. audit seluruh area repo secara nyata,
-2. perbaiki hanya mismatch nyata / bug correctness / env contract / build-typecheck-test-probe failure,
-3. bersihkan `REFACTOR_LOG.md`, `SESSION_CONTEXT_NEXT.md`, `README.md`, `.env.example`,
-4. validasi final,
-5. beri verdict tegas `SIAP LIVE` atau `BELUM SIAP LIVE`.
-
-Batasan penting dari user:
-- jangan refactor ulang besar-besaran bila tidak perlu,
-- pertahankan Telegram sebagai UI utama,
-- pertahankan whitelist user,
-- pertahankan legacy account upload format,
-- pertahankan storage akun di `data/accounts/accounts.json`,
-- pertahankan mode trading `OFF | ALERT_ONLY | SEMI_AUTO | FULL_AUTO`.
+Gunakan repository source code aktual `masreykangtrade-oss/cukong-markets` sebagai sumber kebenaran utama. Target utama mengikuti `AUDIT_FORENSIK_PROMPT.md`, dengan aturan audit keras: audit ulang file load-bearing, implement patch produksi yang menutup gap target utama, jangan refactor di luar konteks, jalankan lint/build/probe relevan, sinkronkan README + dokumen audit/log/context ke kondisi source nyata, dan beri verdict live-test jujur. User mengizinkan live buy/sell nyata untuk validasi akhir, dengan syarat secret hanya dipakai saat runtime/test dan tidak pernah ditulis ke repo.
 
 ## Architecture Decisions
-- Mempertahankan arsitektur Telegram-first backend TypeScript yang sudah ada.
-- Menjadikan source of truth runtime publik/callback tetap env-driven melalui `PUBLIC_BASE_URL` dan `INDODAX_CALLBACK_PATH`.
-- Menjaga route internal inti tetap stabil di `/healthz` dan `/indodax/callback`.
-- Mempertahankan hybrid legacy `/tapi` + Trade API V2 karena memang masih dipakai execution/recovery/history; status ditulis jujur sebagai parsial.
-- Tidak menambah refactor besar karena audit menunjukkan wiring internal utama sudah nyata dan lulus probe.
-- Memisahkan dengan tegas blocker repo internal vs blocker deploy/runtime publik.
+- Tetap mempertahankan arsitektur backend TypeScript Telegram-first yang sudah ada.
+- Menambahkan pemisahan eksplisit `executionMode` LIVE vs SIMULATED tanpa membongkar flow existing.
+- Jalur resmi perubahan mode eksekusi dipasang di Telegram Strategy Settings agar operator tidak perlu edit file manual.
+- Verifikasi repo diresmikan lewat `tsconfig.probes.json`, `scripts/run-probes.mjs`, `yarn typecheck:probes`, `yarn test:probes`, dan `yarn verify`.
+- Source of truth interval dirapikan: market scan memakai `settings.scanner.marketWatchIntervalMs`, polling runtime memakai `settings.scanner.pollingIntervalMs`.
+- Menjaga callback runtime tetap pada contract `/indodax/callback`, dan menambah probe end-to-end `order_id/orderId/id -> reconcileFromCallback()`.
 
-## What Has Been Implemented / Final State
-- Audit source menyeluruh pada root docs/config, `src/config`, `src/core`, `src/storage`, `src/services`, semua domain utama, integrations, server, workers, tests, scripts, deploy/nginx, `package.json`, `tsconfig.json`.
-- Ditemukan mismatch nyata bahwa `.env.example` belum ada; file tersebut dibuat dan disinkronkan dengan semua env yang benar-benar dipakai source.
-- `README.md` dibersihkan agar jujur: menjelaskan implementasi nyata, hal yang masih parsial, kontrak env, callback URL final, peran nginx, Telegram UI utama, probe yang benar-benar tersedia, dan catatan deploy/infrastructure.
-- `REFACTOR_LOG.md` dibersihkan menjadi satu log final yang sinkron dan siap dipakai sebagai source of truth sesi berikutnya.
-- `SESSION_CONTEXT_NEXT.md` disinkronkan agar ringkas dan konsisten dengan README, REFACTOR_LOG, `.env.example`, dan `package.json`.
-- Validasi nyata yang lulus: lint, build, dan seluruh probe utama pada folder `tests/`.
-- Verifikasi publik tambahan menunjukkan `https://kangtrade.top/healthz` dan `https://kangtrade.top/indodax/callback` belum mengarah ke runtime repo ini; ini dicatat sebagai blocker luar repo.
+## What's Implemented
+- `executionMode` kini tampil di `/healthz`, Telegram status, dan log startup.
+- Telegram Strategy Settings sekarang punya kontrol resmi `Execution Simulated` dan `Execution Live`.
+- `PollingService.activeJobs` diperbaiki agar hanya menghitung job aktif.
+- `manualOrder()` BUY sekarang menolak request tanpa `price` valid.
+- Renderer nginx kini sinkron ke artifact `deploy/nginx/cukong-markets.nginx.conf`.
+- `.env.example` ditambahkan dan disinkronkan dengan kontrak env source.
+- Script resmi repo ditambahkan: `typecheck:probes`, `test:probes`, `verify`.
+- Probe baru `tests/callback_reconciliation_probe.ts` membuktikan callback reconciliation end-to-end.
+- README, REFACTOR_LOG, SESSION_CONTEXT_NEXT, dan AUDIT_FORENSIK_PROMPT disinkronkan ke kondisi source + validasi nyata.
+- Live exchange self-test berhasil: round-trip BUY lalu SELL `xrp_idr` via `ExecutionEngine` selesai `CONFIRMED_LIVE`.
 
 ## Prioritized Backlog
-
 ### P0
-- Selaraskan deploy/infrastructure agar domain publik benar-benar mengarah ke app server `/healthz` dan callback server `/indodax/callback` milik repo ini.
-- Pastikan nginx aktif di server publik benar-benar memakai artefak render terbaru dari repo ini.
+- Sinkronkan ingress/runtime publik agar `https://kangtrade.top/healthz` mengembalikan health JSON repo ini.
+- Sinkronkan route publik `POST /indodax/callback` agar benar-benar menuju callback server repo ini.
 
 ### P1
-- Sederhanakan compatibility layer legacy `/tapi` + V2 setelah live routing publik benar-benar stabil.
-- Tambahkan script package khusus untuk menjalankan probe bila diinginkan, karena saat ini probe dijalankan langsung via `tsx`.
+- Tambahkan satu smoke test terpadu bootstrap -> app start -> `/healthz` -> callback -> recovery -> status report.
+- Pecah `ExecutionEngine` menjadi modul lebih kecil untuk menurunkan risiko regresi.
 
 ### P2
-- Tambah observability deploy/runtime publik yang lebih eksplisit bila akses server/deploy tersedia.
-- Evaluasi perapihan minor file besar hanya jika nanti sudah ada kebutuhan maintainability nyata.
+- Setelah ingress publik sinkron, audit ulang live-readiness end-to-end termasuk callback publik dan Telegram operasional live.
+- Evaluasi penyederhanaan compatibility layer legacy `/tapi` + V2 setelah jalur live publik stabil.
 
 ## Next Tasks
-1. Terapkan `.env` production yang benar.
-2. Build dan render nginx dari repo ini.
-3. Deploy app + callback server dengan routing domain yang tepat.
-4. Verifikasi publik `https://<domain>/healthz` mengembalikan JSON health repo ini.
-5. Verifikasi publik `https://<domain>/indodax/callback` dilayani callback server repo ini.
+1. Deploy artifact nginx terbaru dan sinkronkan route publik.
+2. Re-run smoke publik `/healthz` dan `POST /indodax/callback`.
+3. Tambahkan smoke test terpadu satu paket.
+4. Lanjut modularisasi `ExecutionEngine` bila scope berikutnya fokus maintainability.
