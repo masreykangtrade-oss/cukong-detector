@@ -1,43 +1,27 @@
 # PRD
 
 ## Original Problem Statement
-Gunakan repository source code aktual `masreykangtrade-oss/cukong-markets` sebagai sumber kebenaran utama. Target utama mengikuti `AUDIT_FORENSIK_PROMPT.md`, dengan aturan audit keras: audit ulang file load-bearing, implement patch produksi yang menutup gap target utama, jangan refactor di luar konteks, jalankan lint/build/probe relevan, sinkronkan README + dokumen audit/log/context ke kondisi source nyata, dan beri verdict live-test jujur. User mengizinkan live buy/sell nyata untuk validasi akhir, dengan syarat secret hanya dipakai saat runtime/test dan tidak pernah ditulis ke repo.
+Gunakan repository ini sebagai sumber kebenaran utama dan selesaikan migrasi history/recovery Indodax agar jalur execution/recovery tidak lagi parsial. Fokus: order history canonical ke GET /api/v2/order/histories, trade history canonical ke GET /api/v2/myTrades, hapus fallback runtime utama ke legacy orderHistory/tradeHistory, implementasikan windowed search <=7 hari dengan chunked lookup deterministik, pertahankan method resmi lain seperti trade/openOrders/getOrder/cancelOrder di /tapi.
 
 ## Architecture Decisions
-- Tetap mempertahankan arsitektur backend TypeScript Telegram-first yang sudah ada.
-- Menambahkan pemisahan eksplisit `executionMode` LIVE vs SIMULATED tanpa membongkar flow existing.
-- Jalur resmi perubahan mode eksekusi dipasang di Telegram Strategy Settings agar operator tidak perlu edit file manual.
-- Verifikasi repo diresmikan lewat `tsconfig.probes.json`, `scripts/run-probes.mjs`, `yarn typecheck:probes`, `yarn test:probes`, dan `yarn verify`.
-- Source of truth interval dirapikan: market scan memakai `settings.scanner.marketWatchIntervalMs`, polling runtime memakai `settings.scanner.pollingIntervalMs`.
-- Menjaga callback runtime tetap pada contract `/indodax/callback`, dan menambah probe end-to-end `order_id/orderId/id -> reconcileFromCallback()`.
+- Runtime history/recovery default sekarang V2-only; INDODAX_HISTORY_MODE=legacy tetap ada hanya sebagai jalur eksplisit/manual.
+- order history recovery memakai explicit startTime/endTime dengan bounded window search <=7 hari dan chunked lookup deterministik.
+- trade history recovery memakai myTradesV2 dengan symbol + orderId; method resmi lain tetap di /tapi sesuai docs resmi.
 
-## What's Implemented
-- `executionMode` kini tampil di `/healthz`, Telegram status, dan log startup.
-- Telegram Strategy Settings sekarang punya kontrol resmi `Execution Simulated` dan `Execution Live`.
-- `PollingService.activeJobs` diperbaiki agar hanya menghitung job aktif.
-- `manualOrder()` BUY sekarang menolak request tanpa `price` valid.
-- Renderer nginx kini sinkron ke artifact `deploy/nginx/cukong-markets.nginx.conf`.
-- `.env.example` ditambahkan dan disinkronkan dengan kontrak env source.
-- Script resmi repo ditambahkan: `typecheck:probes`, `test:probes`, `verify`.
-- Probe baru `tests/callback_reconciliation_probe.ts` membuktikan callback reconciliation end-to-end.
-- README, REFACTOR_LOG, SESSION_CONTEXT_NEXT, dan AUDIT_FORENSIK_PROMPT disinkronkan ke kondisi source + validasi nyata.
-- Live exchange self-test berhasil: round-trip BUY lalu SELL `xrp_idr` via `ExecutionEngine` selesai `CONFIRMED_LIVE`.
+## Implemented
+- PrivateApi V2 wrapper diselaraskan ke docs resmi: orderHistoriesV2 tanpa orderId, myTradesV2 dengan orderId, normalizer payload resmi V2.
+- ExecutionEngine sekarang canonical ke V2 untuk history/recovery runtime utama tanpa fallback ke legacy orderHistory/tradeHistory.
+- Probe/test diperbarui untuk >24 jam, >7 hari chunked lookup, callback reconcile, dan runtime hardening; lint/build/probes lulus.
+- README, REFACTOR_LOG, dan SESSION_CONTEXT_NEXT disinkronkan ke source aktual.
 
 ## Prioritized Backlog
 ### P0
-- Sinkronkan ingress/runtime publik agar `https://kangtrade.top/healthz` mengembalikan health JSON repo ini.
-- Sinkronkan route publik `POST /indodax/callback` agar benar-benar menuju callback server repo ini.
-
+- Verifikasi deploy/runtime publik agar domain aktif benar-benar mengarah ke runtime repo ini.
 ### P1
-- Tambahkan satu smoke test terpadu bootstrap -> app start -> `/healthz` -> callback -> recovery -> status report.
-- Pecah `ExecutionEngine` menjadi modul lebih kecil untuk menurunkan risiko regresi.
-
+- Pecah executionEngine.ts menjadi modul sync/recovery lebih kecil untuk menurunkan risiko regresi.
 ### P2
-- Setelah ingress publik sinkron, audit ulang live-readiness end-to-end termasuk callback publik dan Telegram operasional live.
-- Evaluasi penyederhanaan compatibility layer legacy `/tapi` + V2 setelah jalur live publik stabil.
+- Tambah smoke test bootstrap penuh app start -> health -> callback -> recovery dalam satu skenario.
 
 ## Next Tasks
-1. Deploy artifact nginx terbaru dan sinkronkan route publik.
-2. Re-run smoke publik `/healthz` dan `POST /indodax/callback`.
-3. Tambahkan smoke test terpadu satu paket.
-4. Lanjut modularisasi `ExecutionEngine` bila scope berikutnya fokus maintainability.
+- Pertahankan probe V2 history sebagai release gate.
+- Lanjut ke verifikasi runtime publik atau refactor modular execution engine jika dibutuhkan.
