@@ -1,4 +1,5 @@
 import { logger } from '../../core/logger';
+import { getPublicPacer, type PublicLane } from './pacing';
 
 export interface IndodaxTickerEntry {
   high: number;
@@ -60,15 +61,22 @@ export class PublicApi {
   constructor(
     private readonly baseUrl: string,
     private readonly timeoutMs = 15_000,
+    private readonly lane: PublicLane = 'public_market_scan',
   ) {}
 
   private async requestJson<T>(url: string, label: string, attempt = 1): Promise<T> {
+    const pacer = getPublicPacer();
     let response: Response;
 
     try {
-      response = await fetch(url, {
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
+      response = await pacer.schedule(
+        this.lane,
+        () =>
+          fetch(url, {
+            signal: AbortSignal.timeout(this.timeoutMs),
+          }),
+        { key: `${this.lane}:${label}` },
+      );
     } catch (error) {
       if (attempt < 2 && shouldRetryTransportError(error)) {
         logger.warn({ label, attempt, error }, 'retrying public api request after transport failure');

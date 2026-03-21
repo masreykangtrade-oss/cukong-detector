@@ -47,6 +47,11 @@ export interface EnvConfig {
   indodaxPrivateBaseUrl: string;
   indodaxTradeApiV2BaseUrl: string;
   indodaxTimeoutMs: number;
+  indodaxPublicMinIntervalMs: number;
+  indodaxPrivateMinIntervalMs: number;
+  indodaxPrivateLiveMinIntervalMs: number;
+  indodaxPrivateReconcileMinIntervalMs: number;
+  indodaxPrivateRecoveryMinIntervalMs: number;
   indodaxHistoryMode: IndodaxHistoryMode;
   indodaxCallbackPath: string;
   indodaxCallbackPort: number;
@@ -322,6 +327,20 @@ export const env: EnvConfig = {
     'https://tapi.indodax.com',
   ),
   indodaxTimeoutMs: readNumber('INDODAX_TIMEOUT_MS', 15_000),
+  indodaxPublicMinIntervalMs: readNumber('INDODAX_PUBLIC_MIN_INTERVAL_MS', 120),
+  indodaxPrivateMinIntervalMs: readNumber('INDODAX_PRIVATE_MIN_INTERVAL_MS', 150),
+  indodaxPrivateLiveMinIntervalMs: readNumber(
+    'INDODAX_PRIVATE_LIVE_MIN_INTERVAL_MS',
+    readNumber('INDODAX_PRIVATE_MIN_INTERVAL_MS', 150),
+  ),
+  indodaxPrivateReconcileMinIntervalMs: readNumber(
+    'INDODAX_PRIVATE_RECONCILE_MIN_INTERVAL_MS',
+    readNumber('INDODAX_PRIVATE_MIN_INTERVAL_MS', 150),
+  ),
+  indodaxPrivateRecoveryMinIntervalMs: readNumber(
+    'INDODAX_PRIVATE_RECOVERY_MIN_INTERVAL_MS',
+    Math.max(readNumber('INDODAX_PRIVATE_MIN_INTERVAL_MS', 150), 250),
+  ),
   indodaxHistoryMode: normalizeIndodaxHistoryMode(readString('INDODAX_HISTORY_MODE'), 'v2_only'),
   indodaxCallbackPath,
   indodaxCallbackPort: readNumber('INDODAX_CALLBACK_PORT', 3001),

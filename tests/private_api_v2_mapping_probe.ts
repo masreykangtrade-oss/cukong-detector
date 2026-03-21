@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { RequestPacer } from '../src/core/requestPacer';
 import { PrivateApi } from '../src/integrations/indodax/privateApi';
 
 async function main() {
@@ -58,6 +59,11 @@ async function main() {
     const api = new PrivateApi({
       baseUrl: 'https://indodax.com/tapi',
       tradeApiV2BaseUrl: 'https://tapi.indodax.com',
+      pacer: new RequestPacer('probe-private', [
+        { name: 'private_live_trading', priority: 100, minIntervalMs: 0 },
+        { name: 'private_reconciliation', priority: 80, minIntervalMs: 0 },
+        { name: 'private_recovery', priority: 30, minIntervalMs: 0 },
+      ]),
       apiKey: 'test-key',
       apiSecret: 'test-secret',
     });

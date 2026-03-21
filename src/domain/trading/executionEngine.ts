@@ -594,18 +594,20 @@ export class ExecutionEngine {
 
   private async loadTradeStats(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
   ): Promise<ExchangeTradeStats | null> {
     const mode = getIndodaxHistoryMode();
 
     if (mode === 'legacy') {
-      return this.loadTradeStatsLegacy(order);
+      return this.loadTradeStatsLegacy(order, lane);
     }
 
-    return this.loadTradeStatsV2(order);
+    return this.loadTradeStatsV2(order, lane);
   }
 
   private async loadTradeStatsLegacy(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery',
   ): Promise<ExchangeTradeStats | null> {
     const api = this.getPrivateApi(order.accountId);
     if (!api || typeof (api as { tradeHistory?: unknown }).tradeHistory !== 'function') {
@@ -613,7 +615,7 @@ export class ExecutionEngine {
     }
 
     try {
-      const response = await api.tradeHistory(order.pair);
+      const response = await api.tradeHistory(order.pair, { lane });
       return this.extractTradeStats(order, response.return ?? {});
     } catch (error) {
       await this.journal.warn(
@@ -631,6 +633,7 @@ export class ExecutionEngine {
 
   private async loadTradeStatsV2(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery',
   ): Promise<ExchangeTradeStats | null> {
     const api = this.getPrivateApi(order.accountId);
     if (!api || typeof (api as { myTradesV2?: unknown }).myTradesV2 !== 'function') {
@@ -643,7 +646,7 @@ export class ExecutionEngine {
         orderId: order.exchangeOrderId,
         limit: 1000,
         sort: 'asc',
-      });
+      }, { lane });
       return this.extractTradeStats(order, response.return ?? {});
     } catch (error) {
       await this.journal.warn(
@@ -661,11 +664,12 @@ export class ExecutionEngine {
 
   private async loadOrderHistorySnapshot(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
   ): Promise<{ snapshot: ExchangeOrderSnapshot | null; source: 'orderHistory' | 'orderHistoryV2' | null }> {
     const mode = getIndodaxHistoryMode();
 
     if (mode === 'legacy') {
-      const legacySnapshot = await this.loadOrderHistorySnapshotLegacy(order);
+      const legacySnapshot = await this.loadOrderHistorySnapshotLegacy(order, lane);
       return {
         snapshot: legacySnapshot,
         source: legacySnapshot ? 'orderHistory' : null,
@@ -673,13 +677,14 @@ export class ExecutionEngine {
     }
 
     return {
-      snapshot: await this.loadOrderHistorySnapshotV2(order),
+      snapshot: await this.loadOrderHistorySnapshotV2(order, lane),
       source: 'orderHistoryV2',
     };
   }
 
   private async loadOrderHistorySnapshotLegacy(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery',
   ): Promise<ExchangeOrderSnapshot | null> {
     const api = this.getPrivateApi(order.accountId);
     if (!api || typeof (api as { orderHistory?: unknown }).orderHistory !== 'function') {
@@ -687,7 +692,7 @@ export class ExecutionEngine {
     }
 
     try {
-      const response = await api.orderHistory(order.pair);
+      const response = await api.orderHistory(order.pair, { lane });
       const match = this.findOrderHistoryMatch(order, response.return ?? {});
       return match ? this.buildExchangeSnapshotFromOrderFields(order, match, 'closed') : null;
     } catch (error) {
@@ -706,6 +711,7 @@ export class ExecutionEngine {
 
   private async loadOrderHistorySnapshotV2(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery',
   ): Promise<ExchangeOrderSnapshot | null> {
     const api = this.getPrivateApi(order.accountId);
     if (!api || typeof (api as { orderHistoriesV2?: unknown }).orderHistoriesV2 !== 'function') {
@@ -724,7 +730,7 @@ export class ExecutionEngine {
           endTime: window.endTime,
           limit: 1000,
           sort: 'asc',
-        });
+        }, { lane });
         const match = this.findOrderHistoryMatch(order, response.return ?? {});
         if (!match) {
           continue;
@@ -838,6 +844,7 @@ export class ExecutionEngine {
 
   private async resolveSubmissionUncertainFromHistory(
     order: OrderRecord,
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
   ): Promise<OrderRecord | undefined> {
     const api = this.getPrivateApi(order.accountId);
     if (!api) {
@@ -852,7 +859,7 @@ export class ExecutionEngine {
         return order;
       }
 
-      const response = await api.orderHistory(order.pair);
+      const response = await api.orderHistory(order.pair, { lane });
       probableMatches.push(...this.findProbableOrderHistoryMatches(order, response.return ?? {}));
     } else {
       if (typeof (api as { orderHistoriesV2?: unknown }).orderHistoriesV2 !== 'function') {
@@ -867,7 +874,7 @@ export class ExecutionEngine {
           endTime: window.endTime,
           limit: 1000,
           sort: 'asc',
-        });
+        }, { lane });
         probableMatches.push(...this.findProbableOrderHistoryMatches(order, response.return ?? {}));
       }
     }
@@ -900,7 +907,7 @@ export class ExecutionEngine {
       return attached;
     }
 
-    const tradeStats = await this.loadTradeStats(attached);
+    const tradeStats = await this.loadTradeStats(attached, lane);
     return this.syncOrderWithSnapshot(
       attached,
       this.mergeTradeStatsIntoSnapshot(
@@ -915,12 +922,14 @@ export class ExecutionEngine {
   private async resolveSubmissionUncertainOrder(
     order: OrderRecord,
     openOrders?: Map<string, ExchangeOpenOrderMatch>,
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
   ): Promise<OrderRecord | undefined> {
     if (order.exchangeOrderId || order.exchangeStatus !== 'submission_uncertain') {
       return order;
     }
 
-    const accountOpenOrders = openOrders ?? (await this.fetchOpenOrdersForAccount(order.accountId));
+    const accountOpenOrders =
+      openOrders ?? (await this.fetchOpenOrdersForAccount(order.accountId, lane));
     const probableOpenOrder = this.findProbableOpenOrderMatch(order, accountOpenOrders);
 
     if (probableOpenOrder) {
@@ -936,7 +945,7 @@ export class ExecutionEngine {
         return attached;
       }
 
-      const tradeStats = await this.loadTradeStats(attached);
+      const tradeStats = await this.loadTradeStats(attached, lane);
       return this.syncOrderWithSnapshot(
         attached,
         this.mergeTradeStatsIntoSnapshot(
@@ -949,7 +958,7 @@ export class ExecutionEngine {
     }
 
     try {
-      const resolvedFromHistory = await this.resolveSubmissionUncertainFromHistory(order);
+      const resolvedFromHistory = await this.resolveSubmissionUncertainFromHistory(order, lane);
       if (resolvedFromHistory?.exchangeOrderId) {
         return resolvedFromHistory;
       }
@@ -1048,7 +1057,10 @@ export class ExecutionEngine {
     return updatedOrder;
   }
 
-  private async fetchOpenOrdersForAccount(accountId: string): Promise<Map<string, ExchangeOpenOrderMatch>> {
+  private async fetchOpenOrdersForAccount(
+    accountId: string,
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
+  ): Promise<Map<string, ExchangeOpenOrderMatch>> {
     const account = this.accounts.getById(accountId);
     if (!account) {
       return new Map();
@@ -1059,7 +1071,7 @@ export class ExecutionEngine {
       return new Map();
     }
 
-    const response = await api.openOrders();
+    const response = await api.openOrders(undefined, { lane, coalesceKey: `openOrders:${accountId}` });
     return this.flattenOpenOrders(response.return ?? {});
   }
 
@@ -1133,7 +1145,10 @@ export class ExecutionEngine {
     return updatedPosition;
   }
 
-  private async syncLiveOrder(orderId: string): Promise<OrderRecord | undefined> {
+  private async syncLiveOrder(
+    orderId: string,
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
+  ): Promise<OrderRecord | undefined> {
     const order = this.orders.getById(orderId);
     if (!order?.exchangeOrderId) {
       return order;
@@ -1145,12 +1160,15 @@ export class ExecutionEngine {
     }
 
     const api = this.indodax.forAccount(account);
-    const tradeStats = await this.loadTradeStats(order);
+    const tradeStats = await this.loadTradeStats(order, lane);
     let snapshot: ExchangeOrderSnapshot | null = null;
     let source: 'getOrder' | 'orderHistory' | 'orderHistoryV2' | 'myTradesV2Fallback' = 'getOrder';
 
     try {
-      const response = await api.getOrder(order.pair, order.exchangeOrderId);
+      const response = await api.getOrder(order.pair, order.exchangeOrderId, {
+        lane,
+        coalesceKey: `getOrder:${order.accountId}:${order.pair}:${order.exchangeOrderId}`,
+      });
       snapshot = this.buildExchangeSnapshot(order, response.return ?? {});
     } catch (error) {
       await this.journal.warn(
@@ -1165,7 +1183,7 @@ export class ExecutionEngine {
     }
 
     if (!snapshot) {
-      const historySnapshot = await this.loadOrderHistorySnapshot(order);
+      const historySnapshot = await this.loadOrderHistorySnapshot(order, lane);
       snapshot = historySnapshot.snapshot;
       if (historySnapshot.source) {
         source = historySnapshot.source;
@@ -1208,7 +1226,7 @@ export class ExecutionEngine {
     try {
       const beforeStatus = target.status;
       const beforeFilled = target.filledQuantity;
-      const synced = await this.syncLiveOrder(target.id);
+      const synced = await this.syncLiveOrder(target.id, 'private_reconciliation');
 
       if (!synced) {
         return null;
@@ -1606,7 +1624,7 @@ export class ExecutionEngine {
       }
 
       const synced = exchangeOrderId
-        ? await this.syncLiveOrder(order.id)
+        ? await this.syncLiveOrder(order.id, 'private_reconciliation')
         : await this.orders.markOpen(order.id);
 
       return this.formatLiveOrderMessage('BUY', synced ?? order);
@@ -1614,7 +1632,7 @@ export class ExecutionEngine {
       if (this.isAmbiguousSubmissionError(error)) {
         const uncertainOrder = await this.markSubmissionUncertain(order, 'buy', error);
         const reconciledOrder = uncertainOrder
-          ? await this.resolveSubmissionUncertainOrder(uncertainOrder)
+          ? await this.resolveSubmissionUncertainOrder(uncertainOrder, undefined, 'private_reconciliation')
           : uncertainOrder;
 
         if (reconciledOrder?.exchangeOrderId) {
@@ -1791,7 +1809,7 @@ export class ExecutionEngine {
       }
 
       const synced = exchangeOrderId
-        ? await this.syncLiveOrder(order.id)
+        ? await this.syncLiveOrder(order.id, 'private_reconciliation')
         : await this.orders.markOpen(order.id);
 
       return this.formatLiveOrderMessage('SELL', synced ?? order);
@@ -1799,7 +1817,7 @@ export class ExecutionEngine {
       if (this.isAmbiguousSubmissionError(error)) {
         const uncertainOrder = await this.markSubmissionUncertain(order, 'sell', error);
         const reconciledOrder = uncertainOrder
-          ? await this.resolveSubmissionUncertainOrder(uncertainOrder)
+          ? await this.resolveSubmissionUncertainOrder(uncertainOrder, undefined, 'private_reconciliation')
           : uncertainOrder;
 
         if (reconciledOrder?.exchangeOrderId) {
@@ -1824,7 +1842,9 @@ export class ExecutionEngine {
     }
   }
 
-  async syncActiveOrders(): Promise<string[]> {
+  async syncActiveOrders(
+    lane: 'private_reconciliation' | 'private_recovery' = 'private_reconciliation',
+  ): Promise<string[]> {
     const settings = this.settings.get();
     if (this.shouldSimulate(settings.tradingMode, settings)) {
       return [];
@@ -1845,7 +1865,7 @@ export class ExecutionEngine {
 
     for (const [accountId, accountOrders] of ordersByAccount.entries()) {
       try {
-        const openOrders = await this.fetchOpenOrdersForAccount(accountId);
+        const openOrders = await this.fetchOpenOrdersForAccount(accountId, lane);
 
         for (const order of accountOrders) {
           if (!order.exchangeOrderId) {
@@ -1855,7 +1875,7 @@ export class ExecutionEngine {
 
             processedOrderIds.add(order.id);
             const beforeExchangeOrderId = order.exchangeOrderId;
-            const resolved = await this.resolveSubmissionUncertainOrder(order, openOrders);
+            const resolved = await this.resolveSubmissionUncertainOrder(order, openOrders, lane);
             if (resolved && (resolved.exchangeOrderId !== beforeExchangeOrderId || resolved.status !== order.status)) {
               messages.push(
                 resolved.exchangeOrderId
@@ -1875,7 +1895,7 @@ export class ExecutionEngine {
           const beforeStatus = order.status;
           const beforeFilled = order.filledQuantity;
           const snapshot = this.buildExchangeSnapshotFromOrderFields(order, openOrder.order, 'open');
-          const tradeStats = await this.loadTradeStats(order);
+          const tradeStats = await this.loadTradeStats(order, lane);
           let synced = await this.syncOrderWithSnapshot(
             order,
             this.mergeTradeStatsIntoSnapshot(snapshot, tradeStats),
@@ -1915,7 +1935,7 @@ export class ExecutionEngine {
 
       try {
         if (!activeOrder.exchangeOrderId && activeOrder.exchangeStatus === 'submission_uncertain') {
-          const resolved = await this.resolveSubmissionUncertainOrder(activeOrder);
+          const resolved = await this.resolveSubmissionUncertainOrder(activeOrder, undefined, lane);
           if (resolved && resolved.exchangeOrderId) {
             messages.push(
               this.formatLiveOrderMessage(resolved.side.toUpperCase() as 'BUY' | 'SELL', resolved),
@@ -1926,7 +1946,7 @@ export class ExecutionEngine {
 
         const beforeStatus = activeOrder.status;
         const beforeFilled = activeOrder.filledQuantity;
-        let synced = await this.syncLiveOrder(activeOrder.id);
+        let synced = await this.syncLiveOrder(activeOrder.id, lane);
 
         if (synced && this.shouldCancelStaleBuyOrder(synced)) {
           synced = await this.cancelStaleBuyOrder(synced);
@@ -1968,7 +1988,7 @@ export class ExecutionEngine {
       return [];
     }
 
-    const messages = await this.syncActiveOrders();
+    const messages = await this.syncActiveOrders('private_recovery');
 
     await this.journal.info(
       'LIVE_ORDER_RECOVERY_COMPLETED',
