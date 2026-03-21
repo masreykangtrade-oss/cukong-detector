@@ -1,9 +1,14 @@
 import pino, { LoggerOptions } from 'pino';
 import { env } from '../config/env';
+import { serializeError } from './error-utils';
 
 const options: LoggerOptions = {
   name: env.appName,
   level: env.logLevel,
+  serializers: {
+    err: serializeError,
+    error: serializeError,
+  },
   redact: {
     paths: [
       'apiSecret',

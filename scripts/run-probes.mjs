@@ -17,7 +17,9 @@ const probes = [
   'tests/execution_summary_failed_probe.ts',
   'tests/indodax_history_v2_probe.ts',
   'tests/app_lifecycle_servers_probe.ts',
+  'tests/bootstrap_observability_probe.ts',
   'tests/callback_reconciliation_probe.ts',
+  'tests/worker_timeout_probe.ts',
 ];
 
 async function runProbe(probe, index) {

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { env } from '../config/env';
+import { createChildLogger } from '../core/logger';
 import type {
   BacktestRunResult,
   BotSettings,
@@ -90,10 +91,13 @@ interface WorkerWrapper {
   lastError: string | null;
 }
 
+const log = createChildLogger({ module: 'worker-pool' });
+
 export class WorkerPoolService {
   private readonly queue: AnyQueuedJob[] = [];
   private readonly jobs = new Map<string, AnyQueuedJob>();
   private readonly workers: WorkerWrapper[] = [];
+  private readonly expectedExitWorkerIds = new Set<string>();
   private readonly featurePipeline = new FeaturePipeline();
   private readonly patternMatcher = new PatternMatcher();
   private started = false;
@@ -136,6 +140,7 @@ export class WorkerPoolService {
 
     this.jobs.clear();
     this.queue.length = 0;
+    activeWorkers.forEach((worker) => this.expectedExitWorkerIds.add(worker.workerId));
     await Promise.allSettled(activeWorkers.map((worker) => worker.worker.terminate()));
   }
 
@@ -174,16 +179,22 @@ export class WorkerPoolService {
           ? 'patternWorker'
           : 'backtestWorker';
 
-    const distPath = path.resolve(process.cwd(), 'dist/workers', `${fileName}.js`);
-    if (existsSync(distPath)) {
-      return distPath;
+    const candidates = [
+      path.resolve(__dirname, '../workers', `${fileName}.js`),
+      path.resolve(process.cwd(), 'dist/workers', `${fileName}.js`),
+      path.resolve(__dirname, '../workers', `${fileName}.ts`),
+      path.resolve(process.cwd(), 'src/workers', `${fileName}.ts`),
+    ];
+
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
     }
 
-    const directory = this.isTsRuntime()
-      ? path.resolve(process.cwd(), 'src/workers')
-      : path.resolve(__dirname, '../workers');
-
-    return path.resolve(directory, `${fileName}.${this.isTsRuntime() ? 'ts' : 'js'}`);
+    throw new Error(
+      `Worker entrypoint not found for ${type}. Checked: ${candidates.join(', ')}`,
+    );
   }
 
   private createWorker(type: WorkerTaskType): WorkerWrapper {
@@ -198,6 +209,8 @@ export class WorkerPoolService {
       : new Worker(workerPath, {
           execArgv: [],
         });
+
+    log.info({ type, workerPath, useTsxCli }, 'worker thread created');
 
     const wrapper: WorkerWrapper = {
       workerId: `${type}-${randomUUID()}`,
@@ -216,12 +229,27 @@ export class WorkerPoolService {
 
     worker.on('error', (error) => {
       wrapper.lastError = error.message;
+      log.error({ workerId: wrapper.workerId, type: wrapper.type, error }, 'worker thread failed');
       this.failCurrentJob(wrapper, error);
     });
 
     worker.on('exit', (code) => {
+      const expectedExit = this.expectedExitWorkerIds.delete(wrapper.workerId);
+      if (expectedExit) {
+        return;
+      }
+
       if (code !== 0) {
         wrapper.lastError = `worker exited with code ${code}`;
+        log.error(
+          {
+            workerId: wrapper.workerId,
+            type: wrapper.type,
+            code,
+            currentJobId: wrapper.currentJobId,
+          },
+          'worker thread exited unexpectedly',
+        );
         this.failCurrentJob(wrapper, new Error(wrapper.lastError));
       }
     });
@@ -246,6 +274,7 @@ export class WorkerPoolService {
     this.jobs.delete(wrapper.currentJobId);
     wrapper.busy = false;
     wrapper.currentJobId = null;
+    log.error({ workerId: wrapper.workerId, type: wrapper.type, error }, 'worker job failed');
     job.reject(error);
     this.dispatch();
   }
@@ -260,6 +289,7 @@ export class WorkerPoolService {
     wrapper.currentJobId = null;
 
     try {
+      this.expectedExitWorkerIds.add(wrapper.workerId);
       await wrapper.worker.terminate();
     } catch {
       // best effort cleanup
@@ -270,6 +300,7 @@ export class WorkerPoolService {
       return;
     }
 
+    log.warn({ workerId: wrapper.workerId, type: wrapper.type }, 'respawning worker thread');
     this.workers.splice(index, 1, this.createWorker(wrapper.type));
     this.dispatch();
   }
@@ -356,6 +387,10 @@ export class WorkerPoolService {
         const owner = this.workers.find((worker) => worker.currentJobId === id);
         if (owner) {
           owner.lastError = `worker task timeout: ${type}`;
+          log.error(
+            { workerId: owner.workerId, type, timeoutMs },
+            'worker task timed out; respawning worker',
+          );
           void this.respawnWorker(owner);
         }
 

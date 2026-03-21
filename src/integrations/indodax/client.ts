@@ -5,7 +5,10 @@ import { PrivateApi } from './privateApi';
 
 export class IndodaxClient {
   constructor(
-    private readonly publicApi = new PublicApi(env.indodaxPublicBaseUrl),
+    private readonly publicApi = new PublicApi(
+      env.indodaxPublicBaseUrl,
+      env.indodaxTimeoutMs,
+    ),
   ) {}
 
   async getTickers(): Promise<Record<string, IndodaxTickerEntry>> {
@@ -20,6 +23,7 @@ export class IndodaxClient {
     return new PrivateApi({
       baseUrl: env.indodaxPrivateBaseUrl,
       tradeApiV2BaseUrl: env.indodaxTradeApiV2BaseUrl,
+      timeoutMs: env.indodaxTimeoutMs,
       apiKey: account.apiKey,
       apiSecret: account.apiSecret,
     });

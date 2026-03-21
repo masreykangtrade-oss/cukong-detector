@@ -1,7 +1,8 @@
-import { logger } from './core/logger';
+import { createChildLogger, logger } from './core/logger';
 import { LightScheduler } from './core/scheduler';
 import { registerShutdown } from './core/shutdown';
 import { env, getIndodaxHistoryMode } from './config/env';
+import { toError } from './core/error-utils';
 
 import { AccountRegistry } from './domain/accounts/accountRegistry';
 import { PairHistoryStore } from './domain/history/pairHistoryStore';
@@ -37,12 +38,40 @@ export interface AppRuntime {
   stop(): Promise<void>;
 }
 
+const startupLog = createChildLogger({ module: 'app-runtime' });
+
+async function runStartupPhase<T>(phase: string, task: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  startupLog.info({ phase }, 'app startup phase started');
+
+  try {
+    const result = await task();
+    startupLog.info({ phase, durationMs: Date.now() - startedAt }, 'app startup phase completed');
+    return result;
+  } catch (error) {
+    const wrappedError = new Error(`app startup phase failed: ${phase}`, {
+      cause: toError(error),
+    });
+
+    startupLog.error(
+      {
+        phase,
+        durationMs: Date.now() - startedAt,
+        error: wrappedError,
+      },
+      'app startup phase failed',
+    );
+
+    throw wrappedError;
+  }
+}
+
 export async function createApp(): Promise<AppRuntime> {
   const scheduler = new LightScheduler();
   const polling = new PollingService(scheduler);
 
   const persistence = new PersistenceService();
-  await persistence.bootstrap();
+  await runStartupPhase('persistence.bootstrap', async () => persistence.bootstrap());
 
   const state = new StateService(persistence);
   const settings = new SettingsService(persistence);
@@ -59,15 +88,17 @@ export async function createApp(): Promise<AppRuntime> {
   const summary = new SummaryService(persistence, journal, report, accountRegistry);
   const appServer = new AppServer(health);
 
-  await Promise.all([
-    state.load(),
-    settings.load(),
-    journal.load(),
-    orderManager.load(),
-    positionManager.load(),
-    accountRegistry.initialize(),
-    health.load(),
-  ]);
+  await runStartupPhase('runtime.state.load', async () => {
+    await Promise.all([
+      state.load(),
+      settings.load(),
+      journal.load(),
+      orderManager.load(),
+      positionManager.load(),
+      accountRegistry.initialize(),
+      health.load(),
+    ]);
+  });
 
   const pairUniverse = new PairUniverse();
   const indodax = new IndodaxClient();
@@ -279,53 +310,72 @@ export async function createApp(): Promise<AppRuntime> {
     await state.setTradingMode(settings.get().tradingMode);
     await state.setStatus('STARTING');
 
-    if (settings.get().workers.enabled) {
-      await workerPool.start();
-    }
+    try {
+      if (settings.get().workers.enabled) {
+        await runStartupPhase('worker-pool.start', async () => workerPool.start());
+      } else {
+        startupLog.info({ phase: 'worker-pool.start', enabled: false }, 'worker pool disabled by settings');
+      }
 
-    await appServer.start();
-    await callbackServer.start();
-    await executionEngine.recoverLiveOrdersOnStartup();
-    await executionEngine.evaluateOpenPositions();
+      await runStartupPhase('app-server.start', async () => appServer.start());
 
-    await telegram.start();
-    polling.start();
+      if (env.indodaxEnableCallbackServer) {
+        await runStartupPhase('callback-server.start', async () => callbackServer.start());
+      } else {
+        startupLog.info({ phase: 'callback-server.start', enabled: false }, 'callback server disabled by env');
+      }
 
-    await state.setStatus('RUNNING');
+      await runStartupPhase('execution.recover-live-orders', async () => {
+        await executionEngine.recoverLiveOrdersOnStartup();
+      });
+      await runStartupPhase('execution.evaluate-open-positions', async () => {
+        await executionEngine.evaluateOpenPositions();
+      });
+      await runStartupPhase('telegram.start', async () => telegram.start());
 
-    await journal.info('APP_STARTED', 'cukong-markets app started', {
-      mode: settings.get().tradingMode,
-      executionMode: settings.getExecutionMode(),
-      dryRun: settings.get().dryRun,
-      paperTrade: settings.get().paperTrade,
-      uiOnly: settings.get().uiOnly,
-      activeAccounts: accountRegistry.countEnabled(),
-      appPort: appServer.getPort(),
-      callbackEnabled: env.indodaxEnableCallbackServer,
-      callbackPort: env.indodaxEnableCallbackServer ? callbackServer.getPort() : null,
-      historyMode: getIndodaxHistoryMode(),
-      marketScanIntervalMs,
-      runtimePollingIntervalMs,
-    });
+      startupLog.info({ phase: 'polling.start' }, 'app startup phase completed');
+      polling.start();
 
-    logger.info(
-      {
+      await state.setStatus('RUNNING');
+
+      await journal.info('APP_STARTED', 'cukong-markets app started', {
         mode: settings.get().tradingMode,
         executionMode: settings.getExecutionMode(),
         dryRun: settings.get().dryRun,
         paperTrade: settings.get().paperTrade,
         uiOnly: settings.get().uiOnly,
         activeAccounts: accountRegistry.countEnabled(),
-        workers: workerPool.snapshot().length,
         appPort: appServer.getPort(),
         callbackEnabled: env.indodaxEnableCallbackServer,
         callbackPort: env.indodaxEnableCallbackServer ? callbackServer.getPort() : null,
         historyMode: getIndodaxHistoryMode(),
         marketScanIntervalMs,
         runtimePollingIntervalMs,
-      },
-      'cukong-markets app started',
-    );
+      });
+
+      logger.info(
+        {
+          mode: settings.get().tradingMode,
+          executionMode: settings.getExecutionMode(),
+          dryRun: settings.get().dryRun,
+          paperTrade: settings.get().paperTrade,
+          uiOnly: settings.get().uiOnly,
+          activeAccounts: accountRegistry.countEnabled(),
+          workers: workerPool.snapshot().length,
+          appPort: appServer.getPort(),
+          callbackEnabled: env.indodaxEnableCallbackServer,
+          callbackPort: env.indodaxEnableCallbackServer ? callbackServer.getPort() : null,
+          historyMode: getIndodaxHistoryMode(),
+          marketScanIntervalMs,
+          runtimePollingIntervalMs,
+        },
+        'cukong-markets app started',
+      );
+    } catch (error) {
+      await state.setStatus('ERROR');
+      startupLog.error({ error }, 'app start failed');
+      throw error;
+    }
   };
 
   const stop = async (): Promise<void> => {

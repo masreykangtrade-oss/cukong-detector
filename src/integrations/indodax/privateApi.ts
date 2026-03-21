@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
+import { toError } from '../../core/error-utils';
 
 export interface IndodaxPrivateApiOptions {
   baseUrl: string;
   tradeApiV2BaseUrl?: string;
+  timeoutMs?: number;
   apiKey: string;
   apiSecret: string;
 }
@@ -178,12 +180,14 @@ function normalizeHistoryLimit(limit: number | undefined, fallback: number): num
 export class PrivateApi {
   private readonly baseUrl: string;
   private readonly tradeApiV2BaseUrl: string;
+  private readonly timeoutMs: number;
   private readonly apiKey: string;
   private readonly apiSecret: string;
 
   constructor(options: IndodaxPrivateApiOptions) {
     this.baseUrl = options.baseUrl;
     this.tradeApiV2BaseUrl = options.tradeApiV2BaseUrl ?? 'https://tapi.indodax.com';
+    this.timeoutMs = options.timeoutMs ?? 15_000;
     this.apiKey = options.apiKey;
     this.apiSecret = options.apiSecret;
   }
@@ -218,15 +222,24 @@ export class PrivateApi {
       ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
     });
 
-    const response = await fetch(this.baseUrl, {
-      method: 'POST',
-      headers: {
-        Key: this.apiKey,
-        Sign: this.sign(body.toString()),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
+    let response: Response;
+
+    try {
+      response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: {
+          Key: this.apiKey,
+          Sign: this.sign(body.toString()),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`Private API ${method} request failed`, {
+        cause: toError(error),
+      });
+    }
 
     if (!response.ok) {
       throw new Error(`Private API ${method} failed: ${response.status}`);
@@ -261,15 +274,24 @@ export class PrivateApi {
     const requestUrl = new URL(path, this.tradeApiV2BaseUrl);
     requestUrl.search = query.toString();
 
-    const response = await fetch(requestUrl, {
-      method: 'GET',
-      headers: {
-        'X-APIKEY': this.apiKey,
-        Sign: this.sign(query.toString()),
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-    });
+    let response: Response;
+
+    try {
+      response = await fetch(requestUrl, {
+        method: 'GET',
+        headers: {
+          'X-APIKEY': this.apiKey,
+          Sign: this.sign(query.toString()),
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`Private API GET ${requestUrl.pathname} request failed`, {
+        cause: toError(error),
+      });
+    }
 
     if (!response.ok) {
       const errorPayload = await response

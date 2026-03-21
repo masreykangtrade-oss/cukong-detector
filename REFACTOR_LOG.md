@@ -2,144 +2,74 @@
 
 Repository aktif: `https://github.com/masreykangtrade-oss/cukong-markets`
 
-Branding/package naming final yang berlaku: `cukong-markets`.
+Dokumen ini hanya mencatat perubahan yang benar-benar masuk ke source aktual.
 
-Dokumen ini merefleksikan status source aktual setelah migrasi history/recovery Indodax ke V2 diselesaikan.
+## Perubahan inti yang selesai
 
----
+### 1. Startup / bootstrap observability
 
-## 1. Kesimpulan tegas saat ini
+- `src/bootstrap.ts` sekarang memuat runtime secara bertahap dan menangkap error import/runtime start di dalam phase bootstrap
+- failure log bootstrap sekarang memuat phase, stack, dan cause chain yang bisa dipakai untuk debugging production
+- `src/app.ts` sekarang memberi phase log eksplisit untuk:
+  - persistence bootstrap
+  - runtime state load
+  - worker pool start
+  - app server start
+  - callback server start
+  - recovery live orders
+  - evaluasi posisi
+  - Telegram start
+  - polling start
 
-- **history/recovery/reconcile untuk scope migrasi sekarang non-parsial**
-- order history runtime canonical ke `GET /api/v2/order/histories`
-- trade history runtime canonical ke `GET /api/v2/myTrades`
-- runtime V2 utama tidak lagi fallback ke legacy `orderHistory` / `tradeHistory`
-- method private API lain seperti `trade`, `openOrders`, `getOrder`, dan `cancelOrder` tetap memakai `/tapi` karena dokumentasi resmi masih menyatakannya valid
+### 2. Logger / error serialization
 
----
+- `src/core/logger.ts` sekarang men-serialize `error` dan `err`
+- startup failure tidak lagi rawan tampil sebagai objek kosong `{}`
+- `src/core/scheduler.ts` sekarang mengeluarkan log saat job gagal atau overlap
+- `src/core/shutdown.ts` sekarang menyimpan error object penuh, bukan hanya message string
 
-## 2. Perubahan source inti yang benar-benar selesai
+### 3. Worker runtime correctness
 
-### `src/integrations/indodax/privateApi.ts`
+- `src/services/workerPoolService.ts` sekarang memprioritaskan path worker build (`dist/workers/*.js`) lalu fallback ke path dev
+- worker path tidak lagi bergantung hanya pada `process.cwd()`
+- false alarm log saat worker dihentikan secara sengaja sudah dibersihkan
+- timeout worker sekarang tetap terlihat jelas tanpa mengotori log dengan exit-error palsu saat shutdown normal
 
-- `orderHistoriesV2()` sekarang mengikuti docs resmi V2 secara ketat:
-  - hanya kirim `symbol`, `startTime`, `endTime`, `limit`, `sort`
-  - **tidak lagi** mengirim `orderId` ke endpoint order history
-  - validasi range maksimum 7 hari per request
-- `myTradesV2()` tetap memakai `symbol + orderId` sesuai docs resmi
-- normalizer response diselaraskan ke payload resmi V2 (`orderId`, `clientOrderId`, `symbol`, `side`, `oriQty`, `executedQty`, `tradeId`, `commission`, `commissionAsset`, dll)
+### 4. Execution safety / resilience
 
-### `src/domain/trading/executionEngine.ts`
+- `src/domain/trading/executionEngine.ts` sekarang memvalidasi notional, reference price, entry price, dan quantity sebelum BUY dibuat
+- SELL manual sekarang menolak exit price yang invalid
+- `src/domain/trading/riskEngine.ts` sekarang memblok entry jika ukuran posisi atau reference price signal invalid
+- `src/integrations/indodax/publicApi.ts` dan `src/integrations/indodax/privateApi.ts` sekarang memakai timeout request nyata via `INDODAX_TIMEOUT_MS`
 
-- `loadTradeStats()` canonical ke V2 untuk runtime normal
-- `loadOrderHistorySnapshot()` canonical ke V2 untuk runtime normal
-- recovery order history V2 sekarang memakai:
-  - windowed search eksplisit berbasis waktu lokal order
-  - batas `<= 7 hari` per request
-  - chunked lookup deterministik ke belakang/ke depan bila window awal tidak cukup
-  - stop segera saat order target ditemukan
-  - journal yang jelas saat target order tidak ditemukan
-- fallback runtime ke legacy `orderHistory` / `tradeHistory` di jalur utama dihapus
-- trade stats V2 tetap dipakai untuk partial fill, weighted average fill, fee, dan update posisi
+### 5. Env contract / docs truthfulness
 
-### `src/config/env.ts`
+- `.env.example` sekarang benar-benar ada dan sinkron dengan env yang dibaca runtime
+- `README.md` disesuaikan agar tidak lagi overclaim status live trading
+- `test:probes` resmi sekarang memasukkan `bootstrap_observability_probe` dan `worker_timeout_probe`
 
-- default final `INDODAX_HISTORY_MODE` sekarang `v2_only`
-- `v2_prefer` dipertahankan hanya sebagai alias kompatibilitas ke `v2_only`
-- `legacy` tetap tersedia sebagai jalur eksplisit/manual, bukan jalur normal production
-
-### `src/app.ts`
-
-- heartbeat health dan startup log kini menampilkan `historyMode`
-- status runtime memperjelas apakah jalur history sedang `V2_CANONICAL` atau `LEGACY_EXPLICIT`
-
-### Probe yang diperbarui
-
-- `tests/private_api_v2_mapping_probe.ts`
-- `tests/indodax_history_v2_probe.ts`
-- `tests/live_execution_hardening_probe.ts`
-- `tests/callback_reconciliation_probe.ts`
-
----
-
-## 3. Status contract Indodax yang sekarang benar
-
-### Canonical V2 untuk history/recovery
-
-- `GET /api/v2/order/histories`
-- `GET /api/v2/myTrades`
-
-### `/tapi` yang tetap sah dan memang masih dipakai
-
-- `getInfo`
-- `trade`
-- `openOrders`
-- `getOrder`
-- `cancelOrder`
-
-Catatan jujur:
-
-- repo ini **tidak** mengklaim full migration semua private API
-- yang selesai di sini adalah **migrasi history/recovery ke V2**
-
----
-
-## 4. Status komponen besar
-
-| Komponen | Status final | Catatan |
-| --- | --- | --- |
-| `src/domain/trading/ExecutionEngine` | implemented & connected | history/recovery V2 canonical, recovery non-hybrid untuk scope migrasi |
-| `src/integrations/indodax` | implemented & connected | wrapper V2 + `/tapi` resmi berjalan berdampingan sesuai docs |
-| callback server | implemented & connected | callback accepted tetap memicu reconcile order aktif |
-| Telegram operational UI | implemented & connected | UX utama tetap dipertahankan |
-| nginx renderer | implemented & connected | env-driven dan sinkron ke branding final |
-| public runtime ingress | belum terbukti dari repo ini | butuh verifikasi deploy/runtime terpisah |
-
----
-
-## 5. Validasi nyata yang lulus
+## Validasi yang benar-benar dijalankan
 
 - `yarn install`
 - `yarn lint`
-- `yarn typecheck:probes`
 - `yarn build`
+- `yarn typecheck:probes`
 - `yarn test:probes`
-- `tests/private_api_v2_mapping_probe.ts`
-- `tests/indodax_history_v2_probe.ts`
-- `tests/live_execution_hardening_probe.ts`
-- `tests/callback_reconciliation_probe.ts`
-- `tests/runtime_backend_regression.ts`
-- `tests/http_servers_probe.ts`
-- `tests/app_lifecycle_servers_probe.ts`
-- `tests/telegram_menu_navigation_probe.ts`
-- `tests/telegram_slippage_confirmation_probe.ts`
-- `tests/execution_summary_failed_probe.ts`
-- `tests/nginx_renderer_probe.ts`
-- `tests/worker_timeout_probe.ts`
+- rerun targeted:
+  - `tests/app_lifecycle_servers_probe.ts`
+  - `tests/worker_timeout_probe.ts`
 
-Probe history/recovery kini membuktikan hal berikut:
+## Status jujur saat ini
 
-- recovery order history V2 tetap bekerja untuk order `> 24 jam`
-- recovery order history V2 tetap bekerja untuk order `> 7 hari` lewat chunked lookup
-- `myTradesV2` benar-benar memakai `orderId`
-- startup recovery tidak lagi membutuhkan legacy `orderHistory` / `tradeHistory`
-- callback reconcile tetap hidup
+### SIAP DEPLOY
 
----
+Ya, untuk scope source repo dan runtime startup/recovery/observability yang diaudit.
 
-## 6. Blocker jujur yang tersisa
+### SIAP LIVE
 
-### Dalam repo
+Belum.
 
-- tidak ada blocker correctness untuk scope migrasi history/recovery yang tersisa
+Blocker utama yang masih tersisa:
 
-### Di luar repo
-
-- domain publik aktif belum dibuktikan mengarah ke runtime repo ini
-- jadi yang belum terbukti sekarang adalah deploy/runtime publik, bukan lagi wiring source history/recovery
-
----
-
-## 7. Ringkasan akhir
-
-Source repo sekarang sinkron, jujur, dan siap dipakai sebagai source of truth internal. Jalur history/recovery Indodax sudah canonical ke V2 dan tidak lagi hybrid pada runtime utama.
+- submit live order timeout/network masih belum punya pembuktian aman end-to-end jika exchange menerima order tetapi response tidak kembali lengkap
+- belum ada pembuktian operasional nyata dari repo ini untuk live shadow-run/non-destruktif auth check exchange

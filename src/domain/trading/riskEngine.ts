@@ -46,6 +46,14 @@ export class RiskEngine {
     return signal.spreadPct;
   }
 
+  private getEntryReferencePrice(signal: SignalCandidate | OpportunityAssessment): number {
+    if ('referencePrice' in signal) {
+      return signal.bestAsk > 0 ? signal.bestAsk : signal.referencePrice;
+    }
+
+    return signal.bestAsk > 0 ? signal.bestAsk : signal.marketPrice;
+  }
+
   private getSpoofRisk(signal: SignalCandidate | OpportunityAssessment): number {
     if ('spoofRisk' in signal) {
       return signal.spoofRisk;
@@ -60,6 +68,14 @@ export class RiskEngine {
 
     if (!input.account.enabled) {
       reasons.push('Account nonaktif');
+    }
+
+    if (!Number.isFinite(input.amountIdr) || input.amountIdr <= 0) {
+      reasons.push('Ukuran posisi tidak valid');
+    }
+
+    if (!Number.isFinite(this.getEntryReferencePrice(input.signal)) || this.getEntryReferencePrice(input.signal) <= 0) {
+      reasons.push('Harga referensi signal tidak valid');
     }
 
     if (this.getScore(input.signal) < input.settings.strategy.minScoreToBuy) {

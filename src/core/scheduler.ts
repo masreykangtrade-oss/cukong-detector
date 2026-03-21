@@ -1,9 +1,13 @@
+import { createChildLogger } from './logger';
+
 export interface ScheduledJob {
   name: string;
   intervalMs: number;
   run: () => Promise<void>;
   runOnStart?: boolean;
 }
+
+const log = createChildLogger({ module: 'light-scheduler' });
 
 interface InternalJob extends ScheduledJob {
   timer: NodeJS.Timeout | null;
@@ -122,6 +126,7 @@ export class LightScheduler {
 
   private async execute(job: InternalJob): Promise<void> {
     if (job.running) {
+      log.warn({ job: job.name, intervalMs: job.intervalMs }, 'scheduler skipped overlapping run');
       return;
     }
 
@@ -134,6 +139,14 @@ export class LightScheduler {
       job.lastError = null;
     } catch (error) {
       job.lastError = error instanceof Error ? error.message : String(error);
+      log.error(
+        {
+          job: job.name,
+          intervalMs: job.intervalMs,
+          error,
+        },
+        'scheduler job failed',
+      );
     } finally {
       job.lastFinishedAt = Date.now();
       job.running = false;

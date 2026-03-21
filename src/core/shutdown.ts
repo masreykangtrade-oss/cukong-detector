@@ -27,7 +27,7 @@ export function createShutdownManager(): ShutdownRegistration {
       logger.info({ signal }, 'Shutdown sequence completed');
     } catch (error) {
       logger.error(
-        { error: error instanceof Error ? error.message : String(error), signal },
+        { error, signal },
         'Shutdown sequence failed',
       );
     } finally {

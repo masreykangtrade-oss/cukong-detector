@@ -1009,6 +1009,37 @@ export class ExecutionEngine {
     return referencePrice * (1 + slippageBps / 10_000);
   }
 
+  private validateBuyIntent(
+    candidate: ExecutionCandidate,
+    amountIdr: number,
+    settings: BotSettings,
+  ): { entryPrice: number; referencePrice: number; quantity: number } {
+    if (!Number.isFinite(amountIdr) || amountIdr <= 0) {
+      throw new Error(`Notional BUY tidak valid untuk ${candidate.pair}`);
+    }
+
+    const referencePrice = this.getBuyReferencePrice(candidate);
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
+      throw new Error(`Harga referensi BUY tidak valid untuk ${candidate.pair}`);
+    }
+
+    const entryPrice = this.getAggressiveBuyLimitPrice(candidate, settings);
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+      throw new Error(`Harga entry BUY tidak valid untuk ${candidate.pair}`);
+    }
+
+    const quantity = amountIdr / entryPrice;
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`Quantity BUY tidak valid untuk ${candidate.pair}`);
+    }
+
+    return {
+      entryPrice,
+      referencePrice,
+      quantity,
+    };
+  }
+
   private shouldCancelStaleBuyOrder(order: OrderRecord): boolean {
     if (order.side !== 'buy' || (order.status !== 'OPEN' && order.status !== 'PARTIALLY_FILLED')) {
       return false;
@@ -1216,9 +1247,11 @@ export class ExecutionEngine {
       throw new Error(riskResult.reasons.join('; '));
     }
 
-    const entryPrice = this.getAggressiveBuyLimitPrice(signal, settings);
-    const referencePrice = this.getBuyReferencePrice(signal);
-    const quantity = entryPrice > 0 ? amountIdr / entryPrice : 0;
+    const { entryPrice, referencePrice, quantity } = this.validateBuyIntent(
+      signal,
+      amountIdr,
+      settings,
+    );
     const stops = this.risk.buildStops(entryPrice, settings);
 
     const order = await this.orders.create({
@@ -1384,6 +1417,10 @@ export class ExecutionEngine {
 
     const exitPrice = position.currentPrice || position.averageEntryPrice;
     const closeQuantity = Math.max(0, Math.min(position.quantity, quantityToSell));
+
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+      throw new Error('Harga SELL tidak valid untuk posisi ini');
+    }
 
     if (closeQuantity <= 0) {
       throw new Error('Quantity sell tidak valid');

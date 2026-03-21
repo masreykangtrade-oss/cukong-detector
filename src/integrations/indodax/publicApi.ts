@@ -37,17 +37,35 @@ function mapTickerEntry(name: string, raw: Record<string, unknown>): IndodaxTick
 }
 
 export class PublicApi {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly timeoutMs = 15_000,
+  ) {}
 
-  async getTickers(): Promise<Record<string, IndodaxTickerEntry>> {
-    const response = await fetch(`${this.baseUrl}/tickers`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch tickers: ${response.status}`);
+  private async requestJson<T>(url: string, label: string): Promise<T> {
+    let response: Response;
+
+    try {
+      response = await fetch(url, {
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`Public API ${label} request failed`, {
+        cause: error instanceof Error ? error : new Error(String(error)),
+      });
     }
 
-    const json = (await response.json()) as {
+    if (!response.ok) {
+      throw new Error(`Public API ${label} failed: ${response.status}`);
+    }
+
+    return (await response.json()) as T;
+  }
+
+  async getTickers(): Promise<Record<string, IndodaxTickerEntry>> {
+    const json = await this.requestJson<{
       tickers?: Record<string, Record<string, unknown>>;
-    };
+    }>(`${this.baseUrl}/tickers`, 'tickers');
 
     const entries = json.tickers ?? {};
     const result: Record<string, IndodaxTickerEntry> = {};
@@ -60,15 +78,10 @@ export class PublicApi {
   }
 
   async getDepth(pair: string): Promise<IndodaxOrderbook> {
-    const response = await fetch(`${this.baseUrl}/${pair}/depth`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch depth for ${pair}: ${response.status}`);
-    }
-
-    const json = (await response.json()) as {
+    const json = await this.requestJson<{
       buy?: Array<[string | number, string | number]>;
       sell?: Array<[string | number, string | number]>;
-    };
+    }>(`${this.baseUrl}/${pair}/depth`, `depth:${pair}`);
 
     return {
       buy: (json.buy ?? []).map(([price, amount]) => [toNumber(price), toNumber(amount)]),
