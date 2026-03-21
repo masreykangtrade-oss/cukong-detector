@@ -48,7 +48,7 @@ Dokumen ini hanya mencatat perubahan yang benar-benar masuk ke source aktual.
 
 - `.env.example` sekarang benar-benar ada dan sinkron dengan env yang dibaca runtime
 - `README.md` disesuaikan agar tidak lagi overclaim status live trading
-- `test:probes` resmi sekarang memasukkan `bootstrap_observability_probe`, `worker_timeout_probe`, `buy_entry_price_guard_probe`, dan `live_submission_uncertain_probe`
+- `test:probes` resmi sekarang memasukkan `bootstrap_observability_probe`, `worker_timeout_probe`, `buy_entry_price_guard_probe`, `live_submission_uncertain_probe`, dan `cancel_submission_uncertain_probe`
 
 ## Validasi yang benar-benar dijalankan
 
