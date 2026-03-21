@@ -1,33 +1,33 @@
-# PRD - Sinkronisasi Final Docs Truthfulness
+# PRD - Sinkronisasi Final Test Reports
 
 ## Original Problem Statement
-Perbarui README.md dan dokumen terkait agar sinkron dengan source code terbaru. Source code tetap sumber kebenaran utama; dokumen hanya boleh merefleksikan kondisi source yang nyata. Perbarui dan bersihkan AUDIT_FORENSIK_PROMPT.md, REFACTOR_LOG.md, dan SESSION_CONTEXT_NEXT.md secara terarah agar sinkron dengan hasil kerja nyata dan mudah dijadikan acuan sesi berikutnya.
+Lanjutkan audit sinkronisasi sehingga tidak ada report stale yang kalah oleh source code dan suite probe aktual.
 
 ## Architecture Decisions
-- Source code runtime tetap sumber kebenaran utama
-- Dokumen harus mengikuti suite probe dan perilaku runtime aktual, bukan status antar-tahap yang sudah tertinggal
-- Klaim live readiness tetap konservatif dan hanya boleh mengikuti bukti probe/source yang nyata
+- Source code + suite probe resmi saat ini tetap sumber kebenaran utama
+- Report lama yang berisi action item yang sudah selesai harus dibersihkan agar tidak menyesatkan sesi berikutnya
+- Report historis tetap boleh menyimpan konteks lama selama tidak lagi memerintahkan hal yang sudah dikerjakan
 
 ## What's Implemented
-- Sinkronkan `README.md` agar daftar probe resmi dan status verifikasi mengikuti suite terbaru (`buy_entry_price_guard`, `live_submission_uncertain`, `cancel_submission_uncertain`)
-- Sinkronkan `AUDIT_FORENSIK_PROMPT.md` agar gap probe yang dulu ada ditandai sebagai historical issue yang sudah diperbaiki, lalu validasi final mencerminkan suite resmi terbaru
-- Sinkronkan `REFACTOR_LOG.md` agar bagian validasi tidak tertinggal dari suite final
-- Sinkronkan `SESSION_CONTEXT_NEXT.md` agar acuan sesi berikutnya mencerminkan official probe suite dan safety gates terbaru
-- Jalankan self-check cepat untuk memastikan empat dokumen memuat probe/safety terms yang benar
+- Scan seluruh `/app/test_reports/iteration_*.json` untuk action item/probe note yang kalah oleh source aktual
+- Sinkronkan `iteration_3.json` agar tidak lagi menyuruh memasukkan `live_execution_hardening_probe` ke suite, karena sekarang probe itu sudah resmi masuk
+- Sebelumnya sudah disinkronkan juga `iteration_14.json` dan `iteration_15.json` agar tidak lagi menyuruh memasukkan probe yang sudah resmi ada di `scripts/run-probes.mjs`
+- Jalankan validasi JSON parse dan stale-string scan untuk memastikan report yang jelas-jelas stale sudah bersih
 
 ## Validation Actually Run
-- `python3` self-check untuk `README.md`
-- `python3` self-check untuk `AUDIT_FORENSIK_PROMPT.md`, `REFACTOR_LOG.md`, `SESSION_CONTEXT_NEXT.md`
+- ripgrep scan seluruh `test_reports/*.json`
+- JSON parse check untuk `iteration_3.json`, `iteration_14.json`, `iteration_15.json`
+- stale-string scan check terhadap action item yang sudah kalah oleh source
 
 ## Prioritized Backlog
 ### P0
-- Tidak ada mismatch docs yang tersisa pada scope task ini
+- Tidak ada stale report yang jelas bertentangan dengan suite probe resmi saat ini
 
 ### P1
-- Saat suite probe berubah lagi, lakukan sync dokumen pada commit yang sama agar tidak stale
+- Jika probe resmi berubah lagi, update report iteration terbaru pada sesi yang sama agar tidak kembali stale
 
 ### P2
-- Pertimbangkan membuat satu dokumen status runtime tunggal jika perubahan safety/probe makin sering
+- Pertimbangkan format report yang punya field `resolved_by_source_at_iteration` supaya histori tetap jelas tanpa perlu rewrite manual
 
 ## Next Tasks
-- Jika lanjut, fokus paling bernilai berikutnya tetap pada pembuktian exchange non-destruktif untuk live readiness.
+- Fokus berikutnya tetap paling bernilai pada pembuktian exchange non-destruktif untuk live readiness.

@@ -1,5 +1,5 @@
 {
-  "summary": "Backend-only live execution hardening verification completed. Build passed, runtime regression passed, worker timeout recovery probe passed, and additional live execution hardening probe passed for partial sync, duplicate guards, and cancel-all flows. Live exchange calls in tests are MOCKED.",
+  "summary": "Backend-only live execution hardening verification completed. Build passed, runtime regression passed, worker timeout recovery probe passed, and live_execution_hardening probe is now covered by the official suite. Live exchange calls in tests are MOCKED.",
   "backend_issues": {
     "critical": [],
     "minor": []
@@ -15,8 +15,8 @@
     "/app/tests/live_execution_hardening_probe.ts"
   ],
   "action_items": [
-    "Optional: keep /app/tests/live_execution_hardening_probe.ts in CI to guard live order semantics regressions.",
-    "Optional: add this probe into automated pre-merge checks alongside runtime_backend_regression and worker_timeout_probe."
+    "Keep /app/tests/live_execution_hardening_probe.ts as part of the official regression suite to guard live order semantics regressions.",
+    "Plan modular split of executionEngine.ts to reduce regression blast radius in future trading safety changes."
   ],
   "critical_code_review_comments": [
     "No new critical defects found in scoped hardening areas (live buy/sell/cancel/sync/duplicate-guard and worker timeout recovery)."
