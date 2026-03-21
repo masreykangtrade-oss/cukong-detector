@@ -57,9 +57,7 @@ Dokumen ini hanya mencatat perubahan yang benar-benar masuk ke source aktual.
 - `yarn build`
 - `yarn typecheck:probes`
 - `yarn test:probes`
-- rerun targeted:
-  - `tests/app_lifecycle_servers_probe.ts`
-  - `tests/worker_timeout_probe.ts`
+- pada kondisi final, `yarn test:probes` sudah mencakup probe safety tambahan untuk `buy_entry_price_guard`, `live_submission_uncertain`, dan `cancel_submission_uncertain`
 
 ## Status jujur saat ini
 

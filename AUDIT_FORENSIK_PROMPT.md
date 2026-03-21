@@ -9,7 +9,7 @@ Dokumen ini sekarang merekam status audit keras terbaru terhadap source aktual.
 - bootstrap failure observability lemah karena error runtime bisa kehilangan stack/cause yang berguna
 - logger belum men-serialize field `error` secara eksplisit
 - worker path production masih rawan bergantung pada `process.cwd()`
-- official probe suite belum menjalankan seluruh probe kritis (`bootstrap_observability_probe`, `worker_timeout_probe`)
+- official probe suite sebelumnya belum menjalankan seluruh probe kritis yang sekarang sudah masuk jalur resmi (`bootstrap_observability_probe`, `worker_timeout_probe`, `buy_entry_price_guard_probe`, `live_submission_uncertain_probe`, `cancel_submission_uncertain_probe`)
 - `.env.example` tidak ada walau dokumentasi mengklaim ada
 - timeout env untuk request Indodax sudah didefinisikan tetapi belum dipakai runtime
 - BUY path masih bisa bergerak dengan reference/entry price invalid
@@ -40,6 +40,7 @@ Dokumen ini sekarang merekam status audit keras terbaru terhadap source aktual.
 - `yarn build`
 - `yarn typecheck:probes`
 - `yarn test:probes`
+- official probe suite final sekarang mencakup guard startup, worker timeout, buy entry, submission uncertain, cancel safety, callback, dan history recovery
 
 ## Verdict final yang berlaku sekarang
 

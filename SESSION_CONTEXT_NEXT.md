@@ -8,7 +8,7 @@ Repository aktif: `https://github.com/masreykangtrade-oss/cukong-markets`
 - startup observability sudah diperkuat: bootstrap/app startup sekarang punya phase log yang jelas
 - `.env.example` sekarang tersedia dan sinkron dengan env runtime aktual
 - worker runtime path sudah aman untuk hasil build production
-- official probe suite sekarang juga menjalankan bootstrap observability dan worker timeout
+- official probe suite sekarang juga menjalankan bootstrap observability, worker timeout, buy-entry guard, `live_submission_uncertain`, dan `cancel_submission_uncertain`
 - history/recovery Indodax tetap canonical ke V2 untuk scope migrasi yang memang di-claim source
 
 ## Temuan audit yang sudah ditutup
@@ -27,6 +27,7 @@ Repository aktif: `https://github.com/masreykangtrade-oss/cukong-markets`
 - `yarn build` lulus
 - `yarn typecheck:probes` lulus
 - `yarn test:probes` lulus
+- suite resmi sudah mencakup probe safety untuk startup, worker timeout, buy-entry guard, dan submission-uncertain cancel safety
 
 ## Verdict yang harus dipakai pada sesi berikutnya
 

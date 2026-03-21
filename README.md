@@ -20,7 +20,7 @@ Yang benar-benar sudah terbukti lewat build/lint/probe:
 - `src/app.ts` sekarang membedakan phase startup penting: persistence, worker, app server, callback server, recovery, evaluasi posisi, Telegram, polling
 - logger Pino sekarang men-serialize `error` dan `err` secara eksplisit, jadi tidak lagi rawan berakhir sebagai `{}`
 - path worker aman untuk runtime build production (`dist/workers/*.js`) dan dev runtime
-- `test:probes` resmi sekarang juga menjalankan `bootstrap_observability_probe`, `worker_timeout_probe`, dan `buy_entry_price_guard_probe`
+- `test:probes` resmi sekarang juga menjalankan `bootstrap_observability_probe`, `worker_timeout_probe`, `buy_entry_price_guard_probe`, `live_submission_uncertain_probe`, dan `cancel_submission_uncertain_probe`
 - `.env.example` sekarang benar-benar ada dan sinkron dengan kontrak env runtime yang dipakai source
 - `INDODAX_TIMEOUT_MS` sekarang benar-benar dipakai untuk request public/private API
 - GET public/private API sekarang punya retry aman untuk status/transport failure yang retriable, sementara POST trading **tidak** di-retry agar tidak berbahaya di kondisi gagal parsial
@@ -40,7 +40,7 @@ Dasarnya:
 - `yarn build` lulus
 - `yarn typecheck:probes` lulus
 - `yarn test:probes` lulus
-- probe startup, callback, recovery, worker timeout, dan history V2 lulus
+- probe startup, callback, recovery, worker timeout, buy-entry guard, submission-uncertain safety, dan history V2 lulus
 
 ### Live trading
 
